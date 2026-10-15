@@ -2,8 +2,8 @@
 
   python app.py            # then open http://127.0.0.1:8050
 
-Adding/removing stocks here edits watchlist.json and positions.json, which the
-2-hour alert job also reads.
+Lists, positions and alert settings edited here live in the data folder, which
+the scheduled alert check (scheduler.py) reads too.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import lists
 import notifiers
 import paths
 import positions
@@ -35,9 +36,8 @@ PORT = paths.PORT
 RESTART_EXIT_CODE = 75  # tells bootstrap.py to start the newly installed version
 TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 CACHE_SECONDS = 60
-SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9.^=\-]{0,14}$|^\^[A-Z0-9.]{1,14}$")
+SYMBOL = lists.SYMBOL
 
-watchlist_lock = threading.Lock()
 cache_lock = threading.Lock()
 MIN_REFRESH_SECONDS = 15  # rapid Refresh clicks reuse the last fetch
 
@@ -54,9 +54,8 @@ def _fetch(tickers: list[str]) -> dict:
 
 
 def snapshot(fresh: bool = False) -> dict:
-    """Market data for the watchlist plus any held tickers that aren't on it."""
-    watchlist = tracker.load_watchlist()
-    tickers = list(dict.fromkeys(watchlist + positions.tickers()))
+    """Market data for every stock on any list, plus held stocks that aren't on one."""
+    tickers = list(dict.fromkeys(lists.all_tickers() + positions.tickers()))
     with cache_lock:
         age = time.time() - _cache["at"]
         if _cache["tickers"] == tickers and age < (MIN_REFRESH_SECONDS if fresh else CACHE_SECONDS):
@@ -86,20 +85,19 @@ def snapshot(fresh: bool = False) -> dict:
                 "crossed_below": r.crossed_below,
             }
         fresh_tickers = {r.ticker for r in readings}
-        rows = []
-        for t in watchlist:
+        rows = {}
+        for t in tickers:
             if t in fresh_tickers:
-                rows.append(_last_good[t])
+                rows[t] = _last_good[t]
             elif t in _last_good:
-                rows.append({**_last_good[t], "stale": True})
+                rows[t] = {**_last_good[t], "stale": True}
             else:
-                rows.append({"ticker": t, "error": "No data"})
+                rows[t] = {"ticker": t, "error": "No data"}
         payload = {
             "updated": datetime.now(timezone.utc).isoformat(),
             "overbought": cfg["alerts"]["overbought"],
             "oversold": cfg["alerts"]["oversold"],
             "ma_period": tracker.ma_settings(cfg)["period"],
-            "gain_alert_pct": tracker.position_settings(cfg)["gain_alert_pct"],
             "stocks": rows,
         }
         # Only cache complete results, so a partial failure is retried next time.
@@ -155,9 +153,15 @@ def has_data(symbol: str) -> bool:
     return symbol in _last_good or symbol in _fetch([symbol])
 
 
-def with_positions(payload: dict) -> dict:
-    """Positions change independently of prices, so they're computed per request."""
-    return {**payload, "positions": positions.summarize(positions.load(), _last_good)}
+def with_user_data(payload: dict) -> dict:
+    """Lists, positions and alert settings change independently of prices, so they're
+    added per request on top of the cached market data."""
+    return {
+        **payload,
+        "lists": lists.load(),
+        "positions": positions.summarize(positions.load(), _last_good),
+        "position_alerts": tracker.position_settings(tracker.load_config(), settings.load()),
+    }
 
 
 def _number(value) -> float | None:
@@ -188,9 +192,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, status_payload())
         elif url.path == "/api/ntfy-qr.svg":
             self._send(200, ntfy_qr_svg(), "image/svg+xml")
+        elif url.path.startswith("/api/lists/") and url.path.endswith("/share"):
+            lst = lists.get(url.path.split("/")[3])
+            if lst is None:
+                return self._json(404, {"error": "List not found"})
+            self._json(200, {"code": lists.share_code(lst), "link": lists.share_link(lst)})
         elif url.path == "/api/stocks":
             try:
-                self._json(200, with_positions(snapshot(fresh="fresh=1" in url.query)))
+                self._json(200, with_user_data(snapshot(fresh="fresh=1" in url.query)))
             except Exception as exc:
                 self._json(502, {"error": f"Couldn't load market data: {exc}"})
         else:
@@ -230,23 +239,43 @@ class Handler(BaseHTTPRequestHandler):
             if result["status"] == "updated":
                 request_restart()
             return
-        if path != "/api/tickers":
-            return self._json(404, {"error": "Not found"})
+        if path.startswith("/api/lists"):
+            return self.lists_post(path.removeprefix("/api/lists").strip("/").split("/"))
+        return self._json(404, {"error": "Not found"})
+
+    def lists_post(self, parts: list[str]) -> None:
         try:
-            symbol = str(self._body()["symbol"]).strip().upper()
-        except (ValueError, KeyError, TypeError):
-            return self._json(400, {"error": "Send JSON like {\"symbol\": \"AAPL\"}"})
-        if not SYMBOL.match(symbol):
-            return self._json(400, {"error": f"“{symbol}” doesn't look like a ticker"})
-        if symbol in tracker.load_watchlist():
-            return self._json(409, {"error": f"{symbol} is already on your list"})
-        if not has_data(symbol):
-            return self._json(404, {"error": f"No market data found for {symbol}"})
-        with watchlist_lock:
-            tickers = tracker.load_watchlist()
-            if symbol not in tickers:
-                tracker.save_watchlist(tickers + [symbol])
-        self._json(201, {"added": symbol})
+            body = self._body()
+        except (ValueError, TypeError):
+            return self._json(400, {"error": "Send JSON"})
+        if parts == [""]:  # create
+            return self._json(201, lists.create(str(body.get("name") or "New list")))
+        if parts in (["preview"], ["import"]):  # a share code or link
+            try:
+                shared = lists.parse_share(str(body.get("code") or ""))
+            except ValueError as exc:
+                return self._json(400, {"error": str(exc)})
+            if parts == ["preview"]:
+                return self._json(200, shared)
+            return self._json(201, lists.create(shared["name"], shared["tickers"], shared["alerts"]))
+        list_id = parts[0]
+        if len(parts) == 1:  # rename / alert switches
+            alerts = body.get("alerts") if isinstance(body.get("alerts"), dict) else None
+            lst = lists.update(list_id, name=body.get("name"), alerts=alerts)
+            return self._json(200, lst) if lst else self._json(404, {"error": "List not found"})
+        if parts[1:] == ["tickers"]:
+            symbol = str(body.get("symbol") or "").strip().upper()
+            if not SYMBOL.match(symbol):
+                return self._json(400, {"error": f"“{symbol}” doesn't look like a ticker"})
+            if lists.get(list_id) is None:
+                return self._json(404, {"error": "List not found"})
+            if symbol in lists.get(list_id)["tickers"]:
+                return self._json(409, {"error": f"{symbol} is already on this list"})
+            if not has_data(symbol):
+                return self._json(404, {"error": f"No market data found for {symbol}"})
+            lists.add_ticker(list_id, symbol)
+            return self._json(201, {"added": symbol})
+        return self._json(404, {"error": "Not found"})
 
     def save_settings(self) -> None:
         try:
@@ -261,6 +290,13 @@ class Handler(BaseHTTPRequestHandler):
             changes["ntfy_topic"] = topic
         if "macos_notify" in body:
             changes["macos_notify"] = bool(body["macos_notify"])
+        if "position_alerts" in body:
+            changes["position_alerts"] = bool(body["position_alerts"])
+        if "gain_alert_pct" in body:
+            pct = _number(body["gain_alert_pct"])
+            if pct is None or pct > 10000:
+                return self._json(400, {"error": "Gain alert must be a percentage above 0"})
+            changes["gain_alert_pct"] = pct
         settings.save(changes)
         self._json(200, status_payload())
 
@@ -291,15 +327,17 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/positions/"):
             n = positions.remove(lot_id=unquote(path.removeprefix("/api/positions/")))
             return self._json(200 if n else 404, {"removed": n} if n else {"error": "Position not found"})
-        if not path.startswith("/api/tickers/"):
-            return self._json(404, {"error": "Not found"})
-        symbol = unquote(path.removeprefix("/api/tickers/")).upper()
-        with watchlist_lock:
-            tickers = tracker.load_watchlist()
-            if symbol not in tickers:
-                return self._json(404, {"error": f"{symbol} isn't on your list"})
-            tracker.save_watchlist([t for t in tickers if t != symbol])
-        self._json(200, {"removed": symbol})
+        parts = [unquote(p) for p in path.removeprefix("/api/lists/").split("/")] if path.startswith("/api/lists/") else []
+        if len(parts) == 1:
+            result = lists.delete(parts[0])
+            if result == "last":
+                return self._json(409, {"error": "You need at least one list."})
+            return self._json(200 if result == "deleted" else 404, {"result": result})
+        if len(parts) == 3 and parts[1] == "tickers":
+            if lists.remove_ticker(parts[0], parts[2].upper()):
+                return self._json(200, {"removed": parts[2].upper()})
+            return self._json(404, {"error": f"{parts[2]} isn't on that list"})
+        self._json(404, {"error": "Not found"})
 
     def log_request(self, code="-", size="-") -> None:
         if str(code).isdigit() and int(code) >= 400:  # keep the log to problems

@@ -8,23 +8,21 @@ The web app runs this on a schedule (see scheduler.py). By hand:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import tomllib
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
 
+import lists
 import notifiers
 import positions
 import settings
 from paths import CODE, DATA
 from stoch import stochastic, zone
-
-WATCHLIST = DATA / "watchlist.json"
-
 
 def _merge(base: dict, override: dict) -> dict:
     out = dict(base)
@@ -41,16 +39,6 @@ def load_config(path: Path | None = None) -> dict:
     if user.exists() and user.resolve() != (CODE / "config.toml").resolve():
         cfg = _merge(cfg, tomllib.loads(user.read_text()))
     return cfg
-
-
-def load_watchlist() -> list[str]:
-    return json.loads(WATCHLIST.read_text()) if WATCHLIST.exists() else []
-
-
-def save_watchlist(tickers: list[str]) -> None:
-    tmp = WATCHLIST.with_suffix(".tmp")
-    tmp.write_text(json.dumps(tickers) + "\n")
-    tmp.replace(WATCHLIST)
 
 
 @dataclass
@@ -88,8 +76,8 @@ class Reading:
 
     def ma_line(self, period: int) -> str:
         return (
-            f"{self.ticker:<6} ${self.price:,.2f}  {period}d MA ${self.sma:,.2f}"
-            f"  ({self.sma_pct:+.1f}%)"
+            f"{self.ticker:<6} FELL BELOW {period}D MA  ${self.price:,.2f}"
+            f" (MA ${self.sma:,.2f}, {self.sma_pct:+.1f}%)"
         )
 
     def line(self) -> str:
@@ -156,11 +144,18 @@ def analyze(data: dict[str, pd.DataFrame], cfg: dict) -> tuple[list[Reading], li
 
 
 def ma_settings(cfg: dict) -> dict:
-    return {"period": 50, "alert_on_cross_below": True, **cfg.get("moving_average", {})}
+    return {"period": 50, **cfg.get("moving_average", {})}
 
 
-def position_settings(cfg: dict) -> dict:
-    return {"gain_alert_pct": 40, **cfg.get("positions", {})}
+def position_settings(cfg: dict, user: dict | None = None) -> dict:
+    """+N% position alerts: on/off and threshold come from the page (settings.json),
+    falling back to config.toml."""
+    user = user or {}
+    pct = cfg.get("positions", {}).get("gain_alert_pct", 40)
+    return {
+        "enabled": bool(user.get("position_alerts", True)),
+        "gain_alert_pct": float(user.get("gain_alert_pct") or pct),
+    }
 
 
 def gain_line(h: dict) -> str:
@@ -169,54 +164,78 @@ def gain_line(h: dict) -> str:
 
 
 def build_alert(
-    readings: list[Reading], cfg: dict, gain_hits: list[dict] | None = None
+    readings: dict[str, Reading],
+    stock_lists: list[dict],
+    cfg: dict,
+    gain_hits: list[dict] | None = None,
+    gain_pct: float = 40,
 ) -> tuple[str, str, bool] | None:
-    """Title, body and urgency for one notification, or None if nothing to report."""
-    ma = ma_settings(cfg)
-    gain_hits = gain_hits or []
-    flagged = sorted((r for r in readings if r.zone != "neutral"), key=lambda r: r.k, reverse=True)
-    crossed = [r for r in readings if r.crossed_below] if ma["alert_on_cross_below"] else []
+    """Title, body and urgency for one notification, or None if nothing to report.
 
-    parts, sections = [], []
-    if n := sum(r.zone == "overbought" for r in flagged):
-        parts.append(f"{n} overbought")
-    if n := sum(r.zone == "oversold" for r in flagged):
-        parts.append(f"{n} oversold")
-    if flagged:
-        sections.append("\n".join(r.line() for r in flagged))
-    if crossed:
-        parts.append(f"{len(crossed)} fell below {ma['period']}d MA")
-        sections.append(
-            f"Fell below {ma['period']}-day MA:\n"
-            + "\n".join(r.ma_line(ma["period"]) for r in sorted(crossed, key=lambda r: r.sma_pct))
-        )
+    Each list only reports the alerts it has switched on. A stock on several lists
+    is reported once per kind of alert, under the first list that wants it.
+    """
+    ma_period = ma_settings(cfg)["period"]
+    counts: Counter = Counter()
+    reported: set[tuple[str, str]] = set()
+    sections, urgent = [], False
+
     if gain_hits:
-        pct = position_settings(cfg)["gain_alert_pct"]
-        parts.insert(0, f"{len(gain_hits)} position{'s' if len(gain_hits) > 1 else ''} up {pct:g}%+")
-        sections.insert(0, f"Up {pct:g}% or more:\n" + "\n".join(gain_line(h) for h in gain_hits))
+        counts["gain"] = len(gain_hits)
+        sections.append(f"Up {gain_pct:g}% or more:\n" + "\n".join(gain_line(h) for h in gain_hits))
+        urgent = True
+
+    for lst in stock_lists:
+        rules = lst["alerts"]
+        if not rules["enabled"]:
+            continue
+        lines = []
+        for t in lst["tickers"]:
+            r = readings.get(t)
+            if r is None:
+                continue
+            if r.zone != "neutral" and rules[r.zone] and (t, "zone") not in reported:
+                reported.add((t, "zone"))
+                counts[r.zone] += 1
+                lines.append(r.line())
+                urgent |= r.is_new
+            if r.crossed_below and rules["below_ma"] and (t, "ma") not in reported:
+                reported.add((t, "ma"))
+                counts["below_ma"] += 1
+                lines.append(r.ma_line(ma_period))
+                urgent = True
+        if lines:
+            sections.append(f"{lst['name']}:\n" + "\n".join(lines))
+
+    labels = [
+        ("gain", lambda n: f"{n} position{'s' if n > 1 else ''} up {gain_pct:g}%+"),
+        ("overbought", lambda n: f"{n} overbought"),
+        ("oversold", lambda n: f"{n} oversold"),
+        ("below_ma", lambda n: f"{n} fell below {ma_period}d MA"),
+    ]
+    parts = [label(counts[key]) for key, label in labels if counts[key]]
     if parts:
-        urgent = bool(crossed or gain_hits) or any(r.is_new for r in flagged)
         return "Stocks: " + ", ".join(parts), "\n\n".join(sections), urgent
     if cfg["alerts"].get("notify_when_quiet"):
-        return "Stocks: all quiet", "Nothing overbought, oversold or newly below the MA.", False
+        return "Stocks: all quiet", "Nothing to report.", False
     return None
 
 
 def run_check(dry_run: bool = False, log=print) -> dict:
     """One full check: fetch prices, work out alerts, notify. Returns what happened."""
     cfg = load_config()
-    watchlist = load_watchlist()
+    user = settings.load()
+    stock_lists = lists.load()
     lots = positions.load()
-    tickers = list(dict.fromkeys(watchlist + [l["ticker"] for l in lots]))
+    tickers = list(dict.fromkeys(lists.all_tickers() + [l["ticker"] for l in lots]))
     if not tickers:
-        log("Watchlist is empty; nothing to check.")
+        log("No stocks on any list; nothing to check.")
         return {"status": "empty"}
     all_readings, _ = analyze(fetch(tickers, threads=False), cfg)
     missing = sorted(set(tickers) - {r.ticker for r in all_readings})
-    # Stochastic/MA alerts cover the watchlist; held stocks off the list only count for gains.
-    readings = [r for r in all_readings if r.ticker in watchlist]
+    readings = {r.ticker: r for r in all_readings}
 
-    for r in sorted(readings, key=lambda r: r.k, reverse=True):
+    for r in sorted(all_readings, key=lambda r: r.k, reverse=True):
         log(r.line())
     if missing:
         log(f"[warn] no usable data for: {', '.join(missing)}")
@@ -224,8 +243,9 @@ def run_check(dry_run: bool = False, log=print) -> dict:
         log("[error] no data fetched")
         return {"status": "error", "error": "No market data"}
 
+    pos_cfg = position_settings(cfg, user)
     gain_hits, alert_state = [], None
-    if lots:
+    if lots and pos_cfg["enabled"]:
         summary = positions.summarize(
             lots, {r.ticker: {"price": r.price, "change": r.change, "change_pct": r.change_pct}
                    for r in all_readings}
@@ -234,10 +254,10 @@ def run_check(dry_run: bool = False, log=print) -> dict:
         if t["gain_pct"] is not None:
             log(f"Positions: ${t['value']:,.2f}  total {t['gain']:+,.2f} ({t['gain_pct']:+.1f}%)")
         gain_hits, alert_state = positions.gain_alerts(
-            summary, position_settings(cfg)["gain_alert_pct"], positions.load_alert_state()
+            summary, pos_cfg["gain_alert_pct"], positions.load_alert_state()
         )
 
-    alert = build_alert(readings, cfg, gain_hits)
+    alert = build_alert(readings, stock_lists, cfg, gain_hits, pos_cfg["gain_alert_pct"])
     if alert is None:
         log("Nothing to report; no notification sent.")
         result = {"status": "quiet"}
@@ -246,7 +266,7 @@ def run_check(dry_run: bool = False, log=print) -> dict:
         log(f"[dry run] would send: {alert[0]}\n{alert[1]}")
         return {"status": "dry_run", "title": alert[0], "body": alert[1]}
     else:
-        sent = notifiers.send(*alert, settings=settings.load())
+        sent = notifiers.send(*alert, settings=user)
         log(f"Notified via: {', '.join(sent)}" if sent else "[warn] no notification channel configured")
         result = {"status": "sent" if sent else "no_channel", "title": alert[0], "body": alert[1], "sent": sent}
     # Remember which positions were pinged only once the ping actually went out.

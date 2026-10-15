@@ -6,7 +6,7 @@ import tracker
 CFG = {
     "stochastic": {"period": 14, "smooth_k": 3, "d": 3},
     "alerts": {"overbought": 101, "oversold": -1},  # keep stochastic alerts out of the way
-    "moving_average": {"period": 50, "alert_on_cross_below": True},
+    "moving_average": {"period": 50},
 }
 
 
@@ -39,12 +39,19 @@ def test_not_enough_history_means_no_ma():
     assert r.sma is None and not r.below_sma and not r.crossed_below
 
 
+def lst(name, tickers, **alerts):
+    return {"id": name, "name": name, "tickers": tickers,
+            "alerts": {"enabled": True, "overbought": True, "oversold": True, "below_ma": True, **alerts}}
+
+
 def test_alert_includes_ma_cross():
-    title, body, urgent = tracker.build_alert([reading([100.0] * 59 + [90.0])], CFG)
+    r = reading([100.0] * 59 + [90.0])
+    title, body, urgent = tracker.build_alert({"X": r}, [lst("Tech", ["X"])], CFG)
     assert "fell below 50d MA" in title
-    assert "Fell below 50-day MA" in body and urgent
+    assert body.startswith("Tech:") and "FELL BELOW 50D MA" in body and urgent
 
 
-def test_ma_alert_can_be_disabled():
-    cfg = {**CFG, "moving_average": {"alert_on_cross_below": False}}
-    assert tracker.build_alert([reading([100.0] * 59 + [90.0], cfg)], cfg) is None
+def test_ma_alert_off_for_a_list():
+    r = reading([100.0] * 59 + [90.0])
+    assert tracker.build_alert({"X": r}, [lst("Tech", ["X"], below_ma=False)], CFG) is None
+    assert tracker.build_alert({"X": r}, [lst("Tech", ["X"], enabled=False)], CFG) is None

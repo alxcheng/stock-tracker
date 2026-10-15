@@ -22,6 +22,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -142,6 +143,33 @@
   .inline-msg { font-size: 13px; margin-left: 8px; color: var(--muted); }
   .check { display: flex; gap: 8px; align-items: center; font-size: 14px; margin-top: 12px; }
   .check input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 10px; }
+  .tab { padding: 6px 14px; border-radius: 999px; font-size: 14px; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .tab.ghost { border-style: dashed; color: var(--muted); }
+  .tab .bell { margin-left: 6px; font-size: 11px; opacity: .8; }
+  .list-bar { padding: 12px 16px; }
+  .list-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .list-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .kinds { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
+  .kinds .check { margin-top: 0; }
+  .kinds.off { opacity: .45; }
+  .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch .slider { position: relative; width: 38px; height: 22px; border-radius: 999px; background: var(--border); transition: background .15s; flex: none; }
+  .switch .slider::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .switch input:checked + .slider { background: var(--up-strong); }
+  .switch input:checked + .slider::after { transform: translateX(16px); }
+  .switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 14px; }
+  .panel p { margin: 0 0 8px; color: var(--muted); }
+  .copy-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .copy-row code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; padding: 6px 8px; }
+  textarea { width: 100%; min-height: 64px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); resize: vertical; }
+  .inline-form { display: flex; gap: 6px; align-items: center; margin: 0; }
+  .inline-form input { flex: 0 1 220px; padding: 5px 10px; text-transform: none; }
+  .pos-alerts { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 0; font-size: 14px; }
+  .pos-alerts input[type=number] { flex: none; width: 70px; padding: 4px 8px; text-transform: none; }
   .empty, .loading { padding: 40px 16px; text-align: center; color: var(--muted); }
   .err td { color: var(--muted); }
   .legend { margin-top: 12px; font-size: 12px; color: var(--muted); }
@@ -157,6 +185,8 @@
     .rm { padding: 4px; }
     input { max-width: none; }
     form.pos input { max-width: none; }
+    .list-head { align-items: flex-start; }
+    .kinds { gap: 12px; }
     .col-val, .col-today, .long { display: none; }
     .short { display: inline; }
     .tile .val { font-size: 18px; }
@@ -207,12 +237,56 @@
         <tbody id="posRows"><tr><td colspan="6" class="loading">Loading…</td></tr></tbody>
       </table>
     </div>
+    <div class="pos-alerts">
+      <label class="switch"><input type="checkbox" id="posAlertsOn"><span class="slider"></span>Alert me when a position or my whole portfolio is up</label>
+      <input type="number" id="gainPct" min="1" step="1" aria-label="Gain alert percentage"> %
+      <span class="inline-msg" id="posAlertMsg"></span>
+    </div>
     <p class="legend" id="posLegend"></p>
   </section>
 
-  <h2>Watchlist</h2>
+  <h2>Lists</h2>
+  <div class="tabs" id="tabs"></div>
+  <div class="card list-bar">
+    <div class="list-head">
+      <label class="switch" id="alertsSwitch"><input type="checkbox" id="alertsOn"><span class="slider"></span><span>Alerts for <b id="listName"></b></span></label>
+      <form class="inline-form" id="nameForm" hidden autocomplete="off">
+        <input id="nameInput" maxlength="40" aria-label="List name" required>
+        <button class="small-btn primary" type="submit">Save</button>
+        <button class="small-btn" type="button" id="nameCancel">Cancel</button>
+      </form>
+      <div class="list-actions">
+        <button class="small-btn" type="button" id="renameBtn">Rename</button>
+        <button class="small-btn" type="button" id="shareBtn">Share</button>
+        <button class="small-btn" type="button" id="deleteListBtn">Delete list</button>
+      </div>
+    </div>
+    <div class="kinds" id="kinds">
+      <label class="check"><input type="checkbox" data-kind="overbought"> Overbought</label>
+      <label class="check"><input type="checkbox" data-kind="oversold"> Oversold</label>
+      <label class="check"><input type="checkbox" data-kind="below_ma"> <span id="maKindLabel">Drops below 50-day MA</span></label>
+    </div>
+    <div class="panel" id="sharePanel" hidden>
+      <p>Send this link to someone who has Stock Tracker. Opening it on their computer offers to add the list to their app. Its alert settings come along as a suggestion they can change.</p>
+      <div class="copy-row"><code id="shareLink"></code><button class="small-btn" type="button" data-copy="shareLink">Copy link</button></div>
+      <p>If the link doesn't open for them, they can paste this code into <b>Import</b> instead:</p>
+      <div class="copy-row"><code id="shareCode"></code><button class="small-btn" type="button" data-copy="shareCode">Copy code</button></div>
+    </div>
+    <div class="panel" id="importPanel" hidden>
+      <div id="importPreview"></div>
+      <div id="importPaste">
+        <p>Paste a shared link or code (it starts with ST1-):</p>
+        <textarea id="importText" aria-label="Shared list link or code"></textarea>
+      </div>
+      <div class="list-actions" style="margin-top:8px">
+        <button class="small-btn primary" type="button" id="importBtn">Import list</button>
+        <button class="small-btn" type="button" id="importCancel">Cancel</button>
+        <span class="inline-msg" id="importMsg"></span>
+      </div>
+    </div>
+  </div>
   <form id="add" autocomplete="off">
-    <input id="symbol" placeholder="Add a ticker, e.g. AAPL" aria-label="Ticker symbol" maxlength="15" required>
+    <input id="symbol" placeholder="Add a ticker to this list, e.g. AAPL" aria-label="Ticker symbol" maxlength="15" required>
     <button class="primary" id="addBtn">Add</button>
   </form>
   <div class="msg" id="msg" role="status"></div>
@@ -307,8 +381,12 @@ function render() {
 
 function renderPositions() {
   const { holdings, lots, total } = data.positions;
-  const target = data.gain_alert_pct;
-  $("posLegend").textContent = `Total gain/loss compares today's value with what you paid. You'll get a ping once when a position, or your whole portfolio, is up ${target}% or more.`;
+  const pa = data.position_alerts;
+  const target = pa.gain_alert_pct;
+  $("posAlertsOn").checked = pa.enabled;
+  if (document.activeElement !== $("gainPct")) $("gainPct").value = target;
+  $("posLegend").textContent = "Total gain/loss compares today's value with what you paid." +
+    (pa.enabled ? ` You get one ping when a position, or your whole portfolio, first reaches +${target}%.` : "");
 
   const tile = (label, val, sub, cls = "") => `<div class="tile"><div class="lbl">${label}</div><div class="val ${cls}">${val}${sub ? `<small>${sub}</small>` : ""}</div></div>`;
   $("tiles").innerHTML = total.value == null
@@ -318,7 +396,7 @@ function renderPositions() {
       tile("Today", money(total.day_gain), "", tone(total.day_gain));
 
   if (!holdings.length) {
-    $("posRows").innerHTML = `<tr><td colspan="6" class="empty">No positions yet. Add one above, or press + next to a stock in your watchlist.</td></tr>`;
+    $("posRows").innerHTML = `<tr><td colspan="6" class="empty">No positions yet. Add one above, or press + next to a stock in one of your lists.</td></tr>`;
     return;
   }
   const rmBtn = (attrs, label) => `<td class="num"><button class="rm" ${attrs} title="${label}" aria-label="${label}">×</button></td>`;
@@ -353,8 +431,177 @@ function renderPositions() {
   }).join("");
 }
 
+// ---- Lists ----
+let activeId = null;
+try { activeId = localStorage.getItem("activeList"); } catch {}
+const activeList = () => data.lists.find((l) => l.id === activeId) || data.lists[0];
+function setActive(id) {
+  activeId = id;
+  try { localStorage.setItem("activeList", id); } catch {}
+  $("sharePanel").hidden = true;
+  render();
+}
+
+function renderTabs() {
+  const cur = activeList();
+  $("tabs").innerHTML = data.lists.map((l) =>
+    `<button type="button" class="tab ${l.id === cur.id ? "active" : ""}" data-tab="${esc(l.id)}" title="${l.alerts.enabled ? "Alerts on" : "Alerts off"}">${esc(l.name)} <span class="sublbl" style="display:inline">${l.tickers.length}</span>${l.alerts.enabled ? '<span class="bell" aria-label="alerts on">🔔</span>' : ""}</button>`
+  ).join("") +
+    `<button type="button" class="tab ghost" id="newListBtn">+ New list</button>` +
+    `<button type="button" class="tab ghost" id="importOpenBtn">Import</button>`;
+  $("listName").textContent = cur.name;
+  $("alertsOn").checked = cur.alerts.enabled;
+  $("kinds").classList.toggle("off", !cur.alerts.enabled);
+  document.querySelectorAll("#kinds [data-kind]").forEach((cb) => {
+    cb.checked = cur.alerts[cb.dataset.kind];
+    cb.disabled = !cur.alerts.enabled;
+  });
+  $("maKindLabel").textContent = `Drops below ${data.ma_period}-day MA`;
+  $("deleteListBtn").hidden = data.lists.length < 2;
+}
+
+async function api(method, url, body) {
+  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || res.statusText);
+  return out;
+}
+
+async function saveList(changes) {
+  const cur = activeList();
+  try {
+    const updated = await api("POST", `/api/lists/${cur.id}`, changes);
+    Object.assign(cur, updated);
+  } catch (e) { $("msg").textContent = e.message; }
+  render();
+}
+
+$("tabs").addEventListener("click", async (e) => {
+  const tab = e.target.closest("[data-tab]");
+  if (tab) return setActive(tab.dataset.tab);
+  if (e.target.closest("#newListBtn")) {
+    const lst = await api("POST", "/api/lists", { name: "New list" });
+    data.lists.push(lst);
+    setActive(lst.id);
+    startRename();
+    return;
+  }
+  if (e.target.closest("#importOpenBtn")) openImport("");
+});
+
+$("alertsOn").addEventListener("change", () => saveList({ alerts: { enabled: $("alertsOn").checked } }));
+$("kinds").addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-kind]");
+  if (cb) saveList({ alerts: { [cb.dataset.kind]: cb.checked } });
+});
+
+function startRename() {
+  $("alertsSwitch").hidden = true;
+  $("nameForm").hidden = false;
+  $("nameInput").value = activeList().name;
+  $("nameInput").select();
+  $("nameInput").focus();
+}
+function endRename() { $("nameForm").hidden = true; $("alertsSwitch").hidden = false; }
+$("renameBtn").addEventListener("click", startRename);
+$("nameCancel").addEventListener("click", endRename);
+$("nameForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  endRename();
+  await saveList({ name: $("nameInput").value });
+});
+
+$("deleteListBtn").addEventListener("click", async () => {
+  const btn = $("deleteListBtn");
+  if (!armed(btn)) return;
+  try {
+    await api("DELETE", `/api/lists/${activeList().id}`);
+    data.lists = data.lists.filter((l) => l.id !== activeList().id);
+    setActive(data.lists[0].id);
+  } catch (err) { $("msg").textContent = err.message; }
+});
+
+$("shareBtn").addEventListener("click", async () => {
+  if (!$("sharePanel").hidden) { $("sharePanel").hidden = true; return; }
+  $("importPanel").hidden = true;
+  const out = await api("GET", `/api/lists/${activeList().id}/share`);
+  $("shareLink").textContent = out.link;
+  $("shareCode").textContent = out.code;
+  $("sharePanel").hidden = false;
+});
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-copy]");
+  if (!btn) return;
+  const label = btn.textContent;
+  try { await navigator.clipboard.writeText($(btn.dataset.copy).textContent); btn.textContent = "Copied"; }
+  catch { btn.textContent = "Select and copy it"; }
+  setTimeout(() => (btn.textContent = label), 2000);
+});
+
+// Importing: from a pasted code, or from a share link that opened this page (#import=ST1-...).
+let pendingImport = "";
+async function openImport(code) {
+  $("sharePanel").hidden = true;
+  $("importPanel").hidden = false;
+  $("importMsg").textContent = "";
+  $("importPreview").innerHTML = "";
+  $("importPaste").hidden = !!code;
+  pendingImport = code;
+  if (!code) { $("importText").value = ""; $("importText").focus(); return; }
+  try {
+    const p = await api("POST", "/api/lists/preview", { code });
+    const kinds = ["overbought", "oversold", "below_ma"].filter((k) => p.alerts[k])
+      .map((k) => ({ overbought: "overbought", oversold: "oversold", below_ma: `below ${data.ma_period}-day MA` })[k]);
+    $("importPreview").innerHTML = `<p style="color:var(--text)">Someone shared the list <b>${esc(p.name)}</b> with you: ${p.tickers.length} stock${p.tickers.length === 1 ? "" : "s"}.</p>
+      <p>${p.tickers.map(esc).join(", ")}</p>
+      <p>Suggested alerts: ${p.alerts.enabled && kinds.length ? kinds.join(", ") : "off"}. You can change them after importing.</p>`;
+  } catch (err) {
+    $("importPreview").innerHTML = `<p class="down">${esc(err.message)}</p>`;
+    pendingImport = "";
+  }
+}
+$("importCancel").addEventListener("click", () => { $("importPanel").hidden = true; pendingImport = ""; });
+$("importBtn").addEventListener("click", async () => {
+  const code = pendingImport || $("importText").value;
+  $("importBtn").disabled = true;
+  try {
+    const lst = await api("POST", "/api/lists/import", { code });
+    $("importPanel").hidden = true;
+    pendingImport = "";
+    activeId = lst.id;
+    try { localStorage.setItem("activeList", lst.id); } catch {}
+    await load();
+    $("msg").textContent = `Imported “${lst.name}”.`;
+  } catch (err) { $("importMsg").textContent = err.message; }
+  $("importBtn").disabled = false;
+});
+
+function checkImportLink() {
+  const m = location.hash.match(/import=(ST1-[A-Za-z0-9_-]+)/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);
+  openImport(m[1]);
+  $("importPanel").scrollIntoView({ block: "center" });
+}
+
+// ---- Position alert settings ----
+async function savePositionAlerts(body) {
+  try {
+    await api("POST", "/api/settings", body);
+    $("posAlertMsg").textContent = "Saved";
+    setTimeout(() => ($("posAlertMsg").textContent = ""), 1500);
+    await load();
+  } catch (e) { $("posAlertMsg").textContent = e.message; }
+}
+$("posAlertsOn").addEventListener("change", () => savePositionAlerts({ position_alerts: $("posAlertsOn").checked }));
+$("gainPct").addEventListener("change", () => savePositionAlerts({ gain_alert_pct: $("gainPct").value }));
+
 function renderWatchlist() {
-  const { stocks, overbought: ob, oversold: os, ma_period: maP } = data;
+  renderTabs();
+  const list = activeList();
+  const stocks = list.tickers.map((t) => data.stocks[t] || { ticker: t, error: "No data" });
+  const { overbought: ob, oversold: os, ma_period: maP } = data;
   $("maHead").firstChild.textContent = `${maP}D MA`;
   const t = new Date(data.updated);
   $("sub").textContent = `Slow stochastic (14, 3, 3) on daily bars · updated ${t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
@@ -375,7 +622,7 @@ function renderWatchlist() {
   });
 
   if (!stocks.length) {
-    $("rows").innerHTML = `<tr><td colspan="9" class="empty">Your watchlist is empty. Add a ticker above.</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">This list is empty. Add a ticker above.</td></tr>`;
     return;
   }
 
@@ -391,7 +638,7 @@ function renderWatchlist() {
 
   const held = new Set(data.positions.holdings.map((h) => h.ticker));
   $("rows").innerHTML = rows.map((s) => {
-    const rm = `<td class="num"><button class="rm" data-rm="${esc(s.ticker)}" title="Remove ${esc(s.ticker)} from watchlist" aria-label="Remove ${esc(s.ticker)} from watchlist">×</button></td>`;
+    const rm = `<td class="num"><button class="rm" data-rm="${esc(s.ticker)}" title="Remove ${esc(s.ticker)} from this list" aria-label="Remove ${esc(s.ticker)} from this list">×</button></td>`;
     const pm = held.has(s.ticker)
       ? `<button class="pm held" data-pos-rm="${esc(s.ticker)}" title="Remove your ${esc(s.ticker)} position" aria-label="Remove your ${esc(s.ticker)} position">−</button>`
       : `<button class="pm" data-pos-add="${esc(s.ticker)}" title="Add a ${esc(s.ticker)} position" aria-label="Add a ${esc(s.ticker)} position">+</button>`;
@@ -436,7 +683,7 @@ $("add").addEventListener("submit", async (e) => {
   $("addBtn").textContent = "Adding…";
   $("msg").textContent = "";
   try {
-    const res = await fetch("/api/tickers", {
+    const res = await fetch(`/api/lists/${activeList().id}/tickers`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol }),
@@ -474,7 +721,7 @@ async function removePosition(query, msgEl) {
 $("rows").addEventListener("click", async (e) => {
   const add = e.target.closest("[data-pos-add]");
   if (add) {
-    const s = data.stocks.find((x) => x.ticker === add.dataset.posAdd);
+    const s = data.stocks[add.dataset.posAdd];
     $("posTicker").value = s.ticker;
     $("posPrice").value = s.price != null ? s.price.toFixed(2) : "";
     $("posShares").value = "";
@@ -491,9 +738,10 @@ $("rows").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-rm]");
   if (!btn) return;
   btn.disabled = true;
-  const res = await fetch("/api/tickers/" + encodeURIComponent(btn.dataset.rm), { method: "DELETE" });
+  const list = activeList();
+  const res = await fetch(`/api/lists/${list.id}/tickers/` + encodeURIComponent(btn.dataset.rm), { method: "DELETE" });
   if (!res.ok) $("msg").textContent = (await res.json()).error;
-  data.stocks = data.stocks.filter((s) => s.ticker !== btn.dataset.rm);
+  list.tickers = list.tickers.filter((t) => t !== btn.dataset.rm);
   render();
 });
 
@@ -642,7 +890,8 @@ $("updBtn").addEventListener("click", async () => {
 
 $("refresh").addEventListener("click", () => load(true));
 setInterval(() => { if (!document.hidden) { load(); loadStatus(); } }, 5 * 60 * 1000);
-load();
+load().then(checkImportLink);
+window.addEventListener("hashchange", checkImportLink);
 loadStatus();
 </script>
 </body>

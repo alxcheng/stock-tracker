@@ -1,4 +1,4 @@
-# The stocks to watch live in watchlist.json (edit it directly or via the web page).
+# Stock lists and their alert switches live in lists.json in the data folder (edit them on the page).
 
 [stochastic]
 period = 14      # look-back in trading days
@@ -14,11 +14,10 @@ line = "k"
 notify_when_quiet = false
 
 [moving_average]
-period = 50                  # trading days
-alert_on_cross_below = true  # ping when a stock closes above the MA one session and trades below it now
+period = 50  # trading days. Which lists alert on a drop below it is set per list on the page.
 
 [positions]
-gain_alert_pct = 40  # ping once when a position (or the whole portfolio) is up this much
+gain_alert_pct = 40  # default; each person can change it (or turn it off) on the page
 
 [schedule]
 # When the alert check runs, in US Eastern time, Monday to Friday
