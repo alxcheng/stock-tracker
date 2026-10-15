@@ -8,6 +8,7 @@ The web app runs this on a schedule (see scheduler.py). By hand:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import tomllib
 from collections import Counter
@@ -21,6 +22,7 @@ import lists
 import notifiers
 import positions
 import settings
+from market import RateLimited
 from paths import CODE, DATA
 from stoch import stochastic, zone
 
@@ -88,27 +90,60 @@ class Reading:
         )
 
 
-def fetch(tickers: list[str], threads: bool = True) -> dict[str, pd.DataFrame]:
+class _LogCapture(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+def _rate_limited(text: str) -> bool:
+    text = text.lower()
+    return "too many requests" in text or "rate limit" in text or "ratelimit" in text
+
+
+def fetch(tickers: list[str], threads: bool = True, period: str = "6mo") -> dict[str, pd.DataFrame]:
     """Daily OHLC for each ticker. During market hours the last row is today's
-    in-progress bar, so the reading reflects the latest price."""
-    raw = yf.download(
-        tickers,
-        period="6mo",
-        interval="1d",
-        group_by="ticker",
-        auto_adjust=True,
-        progress=False,
-        threads=threads,
-    )
+    in-progress bar, so the reading reflects the latest price.
+
+    Raises market.RateLimited (with whatever did arrive) if Yahoo throttled us.
+    yf.download doesn't raise for that; it logs the error and returns no data
+    for the affected tickers, so its log is watched for the message.
+    """
+    capture = _LogCapture()
+    yf_log = logging.getLogger("yfinance")
+    yf_log.addHandler(capture)
+    try:
+        raw = yf.download(
+            tickers,
+            period=period,
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=threads,
+        )
+    except Exception as exc:
+        if _rate_limited(f"{type(exc).__name__} {exc}"):
+            raise RateLimited(str(exc)) from exc
+        raise
+    finally:
+        yf_log.removeHandler(capture)
     out = {}
     for t in tickers:
         try:
             df = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
         except KeyError:
             continue
+        if not {"High", "Low", "Close"} <= set(df.columns):
+            continue  # nothing came back for this ticker
         df = df.dropna(subset=["High", "Low", "Close"])
         if not df.empty:
             out[t] = df
+    if any(_rate_limited(m) for m in capture.messages):
+        raise RateLimited("Too many requests", partial=out)
     return out
 
 
@@ -221,8 +256,11 @@ def build_alert(
     return None
 
 
-def run_check(dry_run: bool = False, log=print) -> dict:
-    """One full check: fetch prices, work out alerts, notify. Returns what happened."""
+def run_check(dry_run: bool = False, log=print, data: dict[str, pd.DataFrame] | None = None) -> dict:
+    """One full check: get prices, work out alerts, notify. Returns what happened.
+
+    `data` lets the app pass the prices it already has (see market.py) instead
+    of fetching them again."""
     cfg = load_config()
     user = settings.load()
     stock_lists = lists.load()
@@ -231,7 +269,9 @@ def run_check(dry_run: bool = False, log=print) -> dict:
     if not tickers:
         log("No stocks on any list; nothing to check.")
         return {"status": "empty"}
-    all_readings, _ = analyze(fetch(tickers, threads=False), cfg)
+    if data is None:
+        data = fetch(tickers, threads=False)
+    all_readings, _ = analyze(data, cfg)
     missing = sorted(set(tickers) - {r.ticker for r in all_readings})
     readings = {r.ticker: r for r in all_readings}
 

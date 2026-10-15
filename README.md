@@ -70,6 +70,7 @@ Your watchlist and positions are kept unless you ask for them to be deleted.
 | Piece | What it does |
 |---|---|
 | `app.py` | The local web server at http://127.0.0.1:8050. It runs the alert schedule (`scheduler.py`) and the daily update check (`updater.py`) itself, so each OS only needs one background job. |
+| `market.py` | The only regular source of Yahoo requests. During market hours it fetches prices every 5 minutes and the indicators' history every 15. After the close it fetches once, then waits for the next open. It pauses 30 minutes if Yahoo says "too many requests". Loading the page never triggers a fetch unless data is missing or out of date. |
 | `tracker.py`, `stoch.py`, `positions.py`, `lists.py` | Market data (yfinance), the indicators, positions, lists with their alert rules and share codes, and alert logic. |
 | `bootstrap.py` | Started at login: launchd on Mac, the Startup folder with `pythonw` on Windows. It runs the current version, restarts it after updates, and rolls back an update that keeps crashing. Standard library only. |
 | `install.sh`, `install.ps1` | Install `uv` into the user's home folder; uv brings its own Python. They download the release, verify its checksum, install the locked dependencies, run `selftest.py`, and register the background job. |

@@ -29,86 +29,120 @@ import scheduler
 import settings
 import tracker
 import updater
+from market import Market, market_open
 
 HERE = Path(__file__).parent
 INDEX = HERE / "web" / "index.html"
 PORT = paths.PORT
 RESTART_EXIT_CODE = 75  # tells bootstrap.py to start the newly installed version
 TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-CACHE_SECONDS = 60
 SYMBOL = lists.SYMBOL
-
-cache_lock = threading.Lock()
-MIN_REFRESH_SECONDS = 15  # rapid Refresh clicks reuse the last fetch
+REFRESH_LOOP_SECONDS = 30
 
 # yfinance's sqlite caches open one connection per thread and never close it, so
 # calling it from the server's per-request threads leaks file handles until the
 # process hits "Too many open files". Funnel every call through one long-lived thread.
 _yf_thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yfinance")
-_cache: dict = {"at": 0.0, "tickers": None, "payload": None}
-_last_good: dict[str, dict] = {}  # ticker -> most recent successful row
+market = Market(lambda tickers, period: tracker.fetch(tickers, threads=False, period=period))
+_rows: dict = {"version": None, "rows": {}}
+_rows_lock = threading.Lock()
 
 
-def _fetch(tickers: list[str]) -> dict:
-    return _yf_thread.submit(tracker.fetch, tickers, threads=False).result(timeout=90)
+def all_tickers() -> list[str]:
+    """Every stock on any list, plus held stocks that aren't on one."""
+    return list(dict.fromkeys(lists.all_tickers() + positions.tickers()))
 
 
-def snapshot(fresh: bool = False) -> dict:
-    """Market data for every stock on any list, plus held stocks that aren't on one."""
-    tickers = list(dict.fromkeys(lists.all_tickers() + positions.tickers()))
-    with cache_lock:
-        age = time.time() - _cache["at"]
-        if _cache["tickers"] == tickers and age < (MIN_REFRESH_SECONDS if fresh else CACHE_SECONDS):
-            return _cache["payload"]
-        cfg = tracker.load_config()
-        try:
-            readings, _ = tracker.analyze(_fetch(tickers), cfg) if tickers else ([], [])
-        except Exception as exc:
-            # Yahoo hiccup or rate limit: fall back to the last good data if we have it.
-            print(f"[warn] fetch failed: {exc!r}", file=sys.stderr)
-            if not any(t in _last_good for t in tickers):
-                raise
-            readings = []
-        for r in readings:
-            _last_good[r.ticker] = {
-                "ticker": r.ticker,
-                "price": r.price,
-                "change": r.change,
-                "change_pct": r.change_pct,
-                "k": r.k,
-                "d": r.d,
-                "zone": r.zone,
-                "is_new": r.is_new,
-                "sma": r.sma,
-                "sma_pct": r.sma_pct,
-                "below_sma": r.below_sma,
-                "crossed_below": r.crossed_below,
+def refresh_market(tickers: list[str] | None = None) -> str:
+    """Fetch whatever market.py says is due, on the single yfinance thread."""
+    return _yf_thread.submit(market.refresh, all_tickers() if tickers is None else tickers).result(timeout=300)
+
+
+def start_market_loop() -> None:
+    """The only regular source of Yahoo requests: every 30s, fetch what's due."""
+
+    def loop() -> None:
+        while True:
+            try:
+                refresh_market()
+            except Exception as exc:  # never let the loop die
+                print(f"[market] refresh failed: {exc!r}", flush=True)
+            time.sleep(REFRESH_LOOP_SECONDS)
+
+    threading.Thread(target=loop, name="market", daemon=True).start()
+
+
+def stock_rows() -> dict[str, dict]:
+    """Indicator rows for every stock with data, recomputed only when data changes."""
+    with _rows_lock:
+        version = market.version
+        if _rows["version"] != version:
+            readings, _ = tracker.analyze(market.data(list(market.history)), tracker.load_config())
+            _rows["rows"] = {
+                r.ticker: {
+                    "ticker": r.ticker,
+                    "price": r.price,
+                    "change": r.change,
+                    "change_pct": r.change_pct,
+                    "k": r.k,
+                    "d": r.d,
+                    "zone": r.zone,
+                    "is_new": r.is_new,
+                    "sma": r.sma,
+                    "sma_pct": r.sma_pct,
+                    "below_sma": r.below_sma,
+                    "crossed_below": r.crossed_below,
+                }
+                for r in readings
             }
-        fresh_tickers = {r.ticker for r in readings}
-        rows = {}
-        for t in tickers:
-            if t in fresh_tickers:
-                rows[t] = _last_good[t]
-            elif t in _last_good:
-                rows[t] = {**_last_good[t], "stale": True}
-            else:
-                rows[t] = {"ticker": t, "error": "No data"}
-        payload = {
-            "updated": datetime.now(timezone.utc).isoformat(),
-            "overbought": cfg["alerts"]["overbought"],
-            "oversold": cfg["alerts"]["oversold"],
-            "ma_period": tracker.ma_settings(cfg)["period"],
-            "stocks": rows,
-        }
-        # Only cache complete results, so a partial failure is retried next time.
-        _cache.update(at=time.time() if len(fresh_tickers) == len(tickers) else 0.0,
-                      tickers=tickers, payload=payload)
-        return payload
+            _rows["version"] = version
+        return _rows["rows"]
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def snapshot() -> dict:
+    """What the page shows. Normally no Yahoo request happens here; the market loop
+    keeps data fresh. Only missing or overdue data (just started, woke from sleep,
+    a stock just added) is fetched before answering."""
+    tickers = all_tickers()
+    now = datetime.now(scheduler.ET)
+    if tickers and not market.backing_off(now) and market.overdue(tickers, now):
+        try:
+            refresh_market(tickers)
+        except Exception as exc:
+            print(f"[market] refresh failed: {exc!r}", flush=True)
+    cfg = tracker.load_config()
+    have = stock_rows()
+    rows = {}
+    for t in tickers:
+        if t in have:
+            rows[t] = {**have[t], "stale": True} if t in market.failed else have[t]
+        else:
+            rows[t] = {"ticker": t, "error": "No data"}
+    return {
+        "prices_at": _iso(market.oldest_update(tickers)),
+        "market_open": market_open(now),
+        "backoff_until": _iso(market.backoff_until) if market.backing_off(now) else None,
+        "overbought": cfg["alerts"]["overbought"],
+        "oversold": cfg["alerts"]["oversold"],
+        "ma_period": tracker.ma_settings(cfg)["period"],
+        "stocks": rows,
+    }
 
 
 def run_check_now() -> dict:
-    # Same single yfinance thread as the page uses (see _yf_thread above).
-    return _yf_thread.submit(tracker.run_check).result(timeout=300)
+    """The scheduled alert check. Reuses the app's data when it's current: the
+    refresh only fetches what's due (prices older than 5 minutes during market
+    hours, nothing after the close once the closing prices are in)."""
+    tickers = list(dict.fromkeys(lists.all_tickers() + [l["ticker"] for l in positions.load()]))
+    try:
+        refresh_market(tickers)
+    except Exception as exc:
+        print(f"[market] refresh before check failed: {exc!r}", flush=True)
+    return tracker.run_check(data=market.data(tickers))
 
 
 def schedule_times() -> list[str]:
@@ -149,8 +183,15 @@ def ntfy_qr_svg() -> bytes:
     return buf.getvalue()
 
 
-def has_data(symbol: str) -> bool:
-    return symbol in _last_good or symbol in _fetch([symbol])
+def has_data(symbol: str) -> bool | None:
+    """Whether Yahoo has data for a symbol, fetching it now if it's new.
+    None means we can't tell right now because Yahoo is limiting requests."""
+    if symbol in market.history:
+        return True
+    if market.backing_off(datetime.now(scheduler.ET)):
+        return None
+    refresh_market([symbol])
+    return symbol in market.history
 
 
 def with_user_data(payload: dict) -> dict:
@@ -159,7 +200,7 @@ def with_user_data(payload: dict) -> dict:
     return {
         **payload,
         "lists": lists.load(),
-        "positions": positions.summarize(positions.load(), _last_good),
+        "positions": positions.summarize(positions.load(), stock_rows()),
         "position_alerts": tracker.position_settings(tracker.load_config(), settings.load()),
     }
 
@@ -229,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"code": lists.share_code(lst)})
         elif url.path == "/api/stocks":
             try:
-                self._json(200, with_user_data(snapshot(fresh="fresh=1" in url.query)))
+                self._json(200, with_user_data(snapshot()))
             except Exception as exc:
                 self._json(502, {"error": f"Couldn't load market data: {exc}"})
         else:
@@ -301,7 +342,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(404, {"error": "List not found"})
             if symbol in lists.get(list_id)["tickers"]:
                 return self._json(409, {"error": f"{symbol} is already on this list"})
-            if not has_data(symbol):
+            found = has_data(symbol)
+            if found is None:
+                return self._json(503, {"error": "Yahoo is limiting requests right now. Try again in a little while."})
+            if not found:
                 return self._json(404, {"error": f"No market data found for {symbol}"})
             lists.add_ticker(list_id, symbol)
             return self._json(201, {"added": symbol})
@@ -343,7 +387,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Shares must be a number above 0"})
         if price is None:
             return self._json(400, {"error": "Buy price must be a number above 0"})
-        if not has_data(symbol):
+        found = has_data(symbol)
+        if found is None:
+            return self._json(503, {"error": "Yahoo is limiting requests right now. Try again in a little while."})
+        if not found:
             return self._json(404, {"error": f"No market data found for {symbol}"})
         self._json(201, positions.add(symbol, shares, price))
 
@@ -439,6 +486,7 @@ def main() -> int:
     settings.ensure()
     _server = Server(("127.0.0.1", PORT), Handler)
     watch_parent()
+    start_market_loop()
     scheduler.start(run_check_now, schedule_times)
     updater.start(request_restart)
     print(f"Stock Tracker {paths.VERSION} on http://127.0.0.1:{PORT}  (data: {paths.DATA})", flush=True)
