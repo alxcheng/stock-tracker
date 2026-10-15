@@ -16,15 +16,16 @@ $env:UV_MANAGED_PYTHON = "1"  # use uv's own Python, never whatever else is inst
 
 function Say($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host "`nError: $msg" -ForegroundColor Red; throw $msg }
-function Download($from, $to) {
+function Get-StockTrackerFile($from, $to) {
     if (Test-Path $from) { Copy-Item $from $to } else { Invoke-WebRequest -UseBasicParsing -Uri $from -OutFile $to }
 }
 
 Say "Getting uv (runs the app's Python; installs into your user folder)"
 $Uv = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
 if (-not (Test-Path $Uv)) {
+    # Separate process: uv's installer defines functions that would clash with ours.
     $env:UV_NO_MODIFY_PATH = "1"
-    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 }
 if (-not (Test-Path $Uv)) { Fail "Couldn't install uv." }
 
@@ -32,8 +33,8 @@ Say "Downloading the latest Stock Tracker"
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("stock-tracker-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $Tmp | Out-Null
 $Zip = Join-Path $Tmp "stock-tracker.zip"
-Download $ZipUrl $Zip
-Download "$ZipUrl.sha256" "$Zip.sha256"
+Get-StockTrackerFile $ZipUrl $Zip
+Get-StockTrackerFile "$ZipUrl.sha256" "$Zip.sha256"
 $Expected = ((Get-Content "$Zip.sha256" -Raw).Trim() -split "\s+")[0].ToLower()
 $Actual = (Get-FileHash $Zip -Algorithm SHA256).Hash.ToLower()
 if ($Expected -ne $Actual) { Fail "Checksum mismatch; the download may be corrupted. Try again." }
