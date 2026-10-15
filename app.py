@@ -38,6 +38,8 @@ RESTART_EXIT_CODE = 75  # tells bootstrap.py to start the newly installed versio
 TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SYMBOL = lists.SYMBOL
 REFRESH_LOOP_SECONDS = 30
+VIEW_TIMEOUT = 150  # seconds; the page checks in every 60s while it's visible
+_last_view = 0.0  # when an open, visible page last asked for data
 
 # yfinance's sqlite caches open one connection per thread and never close it, so
 # calling it from the server's per-request threads leaks file handles until the
@@ -58,13 +60,25 @@ def refresh_market(tickers: list[str] | None = None) -> str:
     return _yf_thread.submit(market.refresh, all_tickers() if tickers is None else tickers).result(timeout=300)
 
 
+def background_allowed(user: dict, last_view: float, now: float) -> bool:
+    """Whether the market loop may fetch: always if "Update when page is closed"
+    is on, otherwise only while the page is open and visible."""
+    return bool(user.get("background_updates", True)) or now - last_view < VIEW_TIMEOUT
+
+
+def note_page_view() -> None:
+    global _last_view
+    _last_view = time.time()
+
+
 def start_market_loop() -> None:
     """The only regular source of Yahoo requests: every 30s, fetch what's due."""
 
     def loop() -> None:
         while True:
             try:
-                refresh_market()
+                if background_allowed(settings.load(), _last_view, time.time()):
+                    refresh_market()
             except Exception as exc:  # never let the loop die
                 print(f"[market] refresh failed: {exc!r}", flush=True)
             time.sleep(REFRESH_LOOP_SECONDS)
@@ -109,7 +123,8 @@ def snapshot() -> dict:
     a stock just added) is fetched before answering."""
     tickers = all_tickers()
     now = datetime.now(scheduler.ET)
-    if tickers and not market.backing_off(now) and market.overdue(tickers, now):
+    if (tickers and not market.backing_off(now) and market.overdue(tickers, now)
+            and background_allowed(settings.load(), _last_view, time.time())):
         try:
             refresh_market(tickers)
         except Exception as exc:
@@ -168,6 +183,7 @@ def status_payload() -> dict:
             "ntfy_topic": s.get("ntfy_topic", ""),
             "ntfy_server": (s.get("ntfy_server") or "https://ntfy.sh").rstrip("/"),
             "macos_notify": bool(s.get("macos_notify")),
+            "background_updates": bool(s.get("background_updates", True)),
         },
     }
 
@@ -269,6 +285,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(404, {"error": "List not found"})
             self._json(200, {"code": lists.share_code(lst)})
         elif url.path == "/api/stocks":
+            if "visible=1" in url.query:
+                note_page_view()
             try:
                 self._json(200, with_user_data(snapshot()))
             except Exception as exc:
@@ -364,6 +382,8 @@ class Handler(BaseHTTPRequestHandler):
             changes["ntfy_topic"] = topic
         if "macos_notify" in body:
             changes["macos_notify"] = bool(body["macos_notify"])
+        if "background_updates" in body:
+            changes["background_updates"] = bool(body["background_updates"])
         if "position_alerts" in body:
             changes["position_alerts"] = bool(body["position_alerts"])
         if "gain_alert_pct" in body:

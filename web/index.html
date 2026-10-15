@@ -212,6 +212,9 @@
       <div class="sub" id="sub">Slow stochastic (14, 3, 3) on daily bars</div>
       <div class="sub notice" id="marketNote" hidden></div>
     </div>
+    <label class="switch" title="When off, prices only update while this page is open. Scheduled alert checks still run.">
+      <input type="checkbox" id="bgUpdates" checked><span class="slider"></span><span>Update when page is closed</span>
+    </label>
   </header>
   <div id="banner"></div>
 
@@ -387,7 +390,9 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 // own schedule (prices every 5 min, indicators every 15 min, in market hours).
 async function load() {
   try {
-    const res = await fetch("/api/stocks");
+    // "visible" tells the app someone is looking, so it keeps prices fresh even
+    // when "Update when page is closed" is off.
+    const res = await fetch("/api/stocks" + (document.hidden ? "" : "?visible=1"));
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || res.statusText);
     data = body;
@@ -821,6 +826,7 @@ function renderStatus() {
   $("qr").src = "/api/ntfy-qr.svg?t=" + encodeURIComponent(s.ntfy_topic);
   $("macRow").hidden = st.platform !== "darwin";
   $("macNotify").checked = s.macos_notify;
+  $("bgUpdates").checked = s.background_updates;
 
   const times = st.schedule.times_et.map(etLabel).join(", ");
   $("schedText").textContent = `Checks run weekdays at ${times} Eastern while this computer is on. If it was asleep, a missed check runs when it wakes.` +
@@ -900,8 +906,14 @@ $("updBtn").addEventListener("click", async () => {
   loadStatus();
 });
 
-// Re-read the app's data every minute (this never contacts Yahoo).
+// Re-read the app's data every minute while visible (this never contacts Yahoo
+// itself), and right away when the page comes back into view.
 setInterval(() => { if (!document.hidden) load(); }, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+$("bgUpdates").addEventListener("change", async () => {
+  try { status = await post("/api/settings", { background_updates: $("bgUpdates").checked }); renderStatus(); }
+  catch (e) { $("msg").textContent = e.message; }
+});
 setInterval(() => { if (!document.hidden) loadStatus(); }, 5 * 60 * 1000);
 load();
 loadStatus();

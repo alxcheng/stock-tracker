@@ -43,6 +43,10 @@ Checks run on weekdays at 10am, 12pm, 2pm and 4pm US Eastern while your computer
 - **Position alerts have their own switch** in the Positions section, where you can change the +40% threshold too.
 - **Share a list:** press **Share**, copy the code (it starts with `ST1-`) and send it in any message. The other person presses **Import** and pastes it. The code holds only the list's name, tickers and alert settings; nothing is uploaded anywhere.
 
+## Price updates
+
+During market hours, prices update every 5 minutes. They stay put outside market hours. The **Update when page is closed** switch at the top controls whether that continues with the page closed. Turn it off to fetch prices only while the page is open. Scheduled alert checks still run at their times either way.
+
 ## Updates
 
 Updates install automatically once a day, so there's nothing to do. Each update is downloaded and tested before it's switched on. If a new version fails to start, the app goes back to the previous one on its own. The page shows a short note after an update.

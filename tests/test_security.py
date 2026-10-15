@@ -27,3 +27,4 @@ def test_non_json_posts_refused():
     # A form or plain-text POST is what another site can send without permission.
     assert request_problem("POST", {**OWN, "Content-Type": "text/plain"})
     assert request_problem("POST", {"Host": f"127.0.0.1:{PORT}", "Content-Type": "application/x-www-form-urlencoded"})
+
