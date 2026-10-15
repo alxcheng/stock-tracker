@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+dist/
+*.tmp
+*.log
+.env
+# Per-person data (a dev checkout keeps it next to the code)
+/watchlist.json
+/positions.json
+/settings.json
+/schedule_state.json
+/last_update.json
+/.gain_alert_state.json

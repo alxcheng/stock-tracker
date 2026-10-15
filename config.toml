@@ -1,0 +1,25 @@
+# The stocks to watch live in watchlist.json (edit it directly or via the web page).
+
+[stochastic]
+period = 14      # look-back in trading days
+smooth_k = 3     # 3 = slow stochastic (what most charts show); 1 = fast
+d = 3            # %D signal-line length
+
+[alerts]
+overbought = 80
+oversold = 20
+# Which line triggers alerts: "k" or "d"
+line = "k"
+# Send a notification even when nothing is overbought/oversold
+notify_when_quiet = false
+
+[moving_average]
+period = 50                  # trading days
+alert_on_cross_below = true  # ping when a stock closes above the MA one session and trades below it now
+
+[positions]
+gain_alert_pct = 40  # ping once when a position (or the whole portfolio) is up this much
+
+[schedule]
+# When the alert check runs, in US Eastern time, Monday to Friday
+times_et = ["10:00", "12:00", "14:00", "16:00"]

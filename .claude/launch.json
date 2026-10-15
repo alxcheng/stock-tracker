@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "watchlist",
+      "url": "http://127.0.0.1:8050",
+      "port": 8050
+    }
+  ]
+}

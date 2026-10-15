@@ -1,0 +1,7 @@
+# Left out of the release zip that installs on people's computers
+tests/ export-ignore
+.github/ export-ignore
+.claude/ export-ignore
+release.sh export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore

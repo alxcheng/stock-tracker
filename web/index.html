@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --border: #e3e6eb; --text: #14171c;
+    --muted: #68707d; --accent: #2b59c3;
+    --up: #0f8a4a; --up-bg: #e5f5ec; --up-strong: #16a35b;
+    --down: #c8312d; --down-bg: #fbe9e8; --down-strong: #e04440;
+    --track: #edf0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --surface: #171b21; --border: #262c35; --text: #e8ebef;
+      --muted: #8b94a2; --accent: #7aa2ff;
+      --up: #4cd38a; --up-bg: #11291d; --up-strong: #2fbf71;
+      --down: #ff7a73; --down-bg: #33171a; --down-strong: #ef5b55;
+      --track: #222831;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 48px; }
+  header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); padding: 8px 14px;
+  }
+  button:hover { border-color: var(--muted); }
+  button:disabled { opacity: .6; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  form { display: flex; gap: 8px; margin: 24px 0 8px; }
+  input {
+    flex: 1; max-width: 320px; font: inherit; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    text-transform: uppercase;
+  }
+  input::placeholder { text-transform: none; color: var(--muted); }
+  input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .msg { min-height: 20px; font-size: 13px; color: var(--down); }
+
+  .summary { display: flex; gap: 8px; margin: 8px 0 12px; flex-wrap: wrap; }
+  .chip { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+  .chip.ob { background: var(--up-bg); color: var(--up); border-color: transparent; font-weight: 600; }
+  .chip.os { background: var(--down-bg); color: var(--down); border-color: transparent; font-weight: 600; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th {
+    text-align: left; font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none;
+  }
+  th[data-sort] { cursor: pointer; }
+  th[data-sort]:hover { color: var(--text); }
+  th .arrow { font-size: 10px; margin-left: 2px; }
+  td { padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  .num { text-align: right; }
+  tr.overbought td { background: var(--up-bg); }
+  tr.oversold td { background: var(--down-bg); }
+  tr.overbought td:first-child { box-shadow: inset 3px 0 var(--up-strong); }
+  tr.oversold td:first-child { box-shadow: inset 3px 0 var(--down-strong); }
+  .tk { font-weight: 700; letter-spacing: .01em; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .k { font-weight: 700; }
+  .overbought .k { color: var(--up); }
+  .oversold .k { color: var(--down); }
+
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; color: var(--muted); }
+  .overbought .badge { background: var(--up-strong); color: #fff; }
+  .oversold .badge { background: var(--down-strong); color: #fff; }
+  .stale { display: block; font-size: 10px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .new { font-size: 10px; font-weight: 700; margin-left: 6px; letter-spacing: .05em; }
+
+  .bar { position: relative; width: 140px; height: 8px; border-radius: 4px; background: var(--track); }
+  .bar .zone-lo, .bar .zone-hi { position: absolute; top: 0; bottom: 0; opacity: .35; }
+  .bar .zone-lo { left: 0; background: var(--down-strong); border-radius: 4px 0 0 4px; }
+  .bar .zone-hi { right: 0; background: var(--up-strong); border-radius: 0 4px 4px 0; }
+  .bar .dot {
+    position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+    transform: translate(-50%, -50%); background: var(--text); border: 2px solid var(--surface);
+  }
+  .overbought .bar .dot { background: var(--up-strong); }
+  .oversold .bar .dot { background: var(--down-strong); }
+  .bar .dtick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--muted); transform: translateX(-50%); }
+
+  .ma { font-weight: 600; }
+  .ma .lbl { display: block; font-size: 11px; font-weight: 500; color: var(--muted); }
+  .ma.below { color: var(--down); }
+  .ma.above { color: var(--muted); }
+  .ma .new { display: block; margin: 2px 0 0; color: var(--down); }
+  .chip.ma { background: var(--surface); color: var(--down); border-color: var(--down); }
+  .rm { border: 0; background: none; color: var(--muted); padding: 4px 8px; font-size: 18px; line-height: 1; }
+  .rm:hover { color: var(--down); }
+  h2 { font-size: 17px; margin: 36px 0 0; letter-spacing: -0.01em; }
+  h2 .count { font-weight: 500; color: var(--muted); font-size: 14px; margin-left: 6px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 4px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .tile .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .tile .val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .val small { font-size: 14px; font-weight: 600; margin-left: 4px; }
+  form.pos { flex-wrap: wrap; margin-top: 14px; }
+  form.pos input { flex: 1 1 110px; max-width: 160px; }
+  .sublbl { display: block; font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .gain { font-weight: 700; }
+  .gain small { display: block; font-size: 12px; font-weight: 600; }
+  .hit { display: inline-block; margin-top: 2px; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; background: var(--up-strong); color: #fff; }
+  tr.lot td { padding-top: 6px; padding-bottom: 6px; font-size: 13px; color: var(--muted); background: var(--bg); }
+  tr.lot td:first-child { padding-left: 34px; }
+  .short { display: none; }
+  .pm {
+    width: 22px; height: 22px; padding: 0; margin-right: 8px; border-radius: 6px; font-size: 15px; line-height: 1;
+    font-weight: 700; vertical-align: 1px; color: var(--muted);
+  }
+  .pm.held { color: var(--accent); border-color: var(--accent); }
+  .pm:hover { color: var(--text); }
+  .armed { width: auto; padding: 0 8px; color: #fff !important; background: var(--down-strong) !important; border-color: var(--down-strong) !important; font-size: 12px; }
+  .banner { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--up-bg); color: var(--text); border: 1px solid var(--up-strong); font-size: 14px; }
+  .banner pre { margin: 4px 0 0; font: inherit; color: var(--muted); white-space: pre-wrap; }
+  .settings { display: grid; gap: 12px; margin-top: 12px; }
+  .pad { padding: 16px; overflow: visible; }
+  .pad h3 { margin: 0 0 8px; font-size: 15px; }
+  .pad p { margin: 6px 0; color: var(--muted); font-size: 14px; }
+  .alerts-grid { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .alerts-grid img { width: 132px; height: 132px; border-radius: 8px; background: #fff; flex: none; }
+  .alerts-grid ol { margin: 0; padding-left: 20px; font-size: 14px; flex: 1 1 260px; }
+  .alerts-grid li { margin-bottom: 8px; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); padding: 1px 6px; border-radius: 6px; word-break: break-all; }
+  a { color: var(--accent); }
+  .small-btn { padding: 3px 10px; font-size: 13px; }
+  .inline-msg { font-size: 13px; margin-left: 8px; color: var(--muted); }
+  .check { display: flex; gap: 8px; align-items: center; font-size: 14px; margin-top: 12px; }
+  .check input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; }
+  .empty, .loading { padding: 40px 16px; text-align: center; color: var(--muted); }
+  .err td { color: var(--muted); }
+  .legend { margin-top: 12px; font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 680px) {
+    main { padding-top: 20px; }
+    .col-d, .col-bar, .chg-abs, .col-zone, .ma .lbl { display: none; }
+    table { font-size: 13px; }
+    td, th { padding: 10px 4px; }
+    td:first-child, th:first-child { padding-left: 12px; }
+    .badge { padding: 2px 6px; }
+    .new { display: block; margin: 2px 0 0; }
+    .rm { padding: 4px; }
+    input { max-width: none; }
+    form.pos input { max-width: none; }
+    .col-val, .col-today, .long { display: none; }
+    .short { display: inline; }
+    .tile .val { font-size: 18px; }
+    .tile .val small { display: block; margin-left: 0; }
+    .tiles { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tile:first-child { grid-column: span 2; }
+    .tile .val { white-space: nowrap; }
+    .tile { padding: 10px; }
+    .tile .lbl { font-size: 10.5px; }
+    .pm { width: 20px; height: 20px; margin-right: 4px; font-size: 14px; }
+    tr.lot td:first-child { padding-left: 24px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Stock Tracker</h1>
+      <div class="sub" id="sub">Slow stochastic (14, 3, 3) on daily bars</div>
+    </div>
+    <button id="refresh" type="button">Refresh</button>
+  </header>
+  <div id="banner"></div>
+
+  <section>
+    <h2>Positions</h2>
+    <div class="tiles" id="tiles"></div>
+    <form id="posForm" class="pos" autocomplete="off">
+      <input id="posTicker" placeholder="Ticker" aria-label="Position ticker" maxlength="15" required>
+      <input id="posShares" placeholder="Shares" aria-label="Number of shares" inputmode="decimal" required>
+      <input id="posPrice" placeholder="Buy price" aria-label="Buy price per share" inputmode="decimal" required>
+      <button class="primary" id="posBtn">Add position</button>
+    </form>
+    <div class="msg" id="posMsg" role="status"></div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Stock</th>
+            <th class="num">Price</th>
+            <th class="num col-val">Value</th>
+            <th class="num col-today">Today</th>
+            <th class="num"><span class="long">Total gain/loss</span><span class="short">Total</span></th>
+            <th><span hidden>Remove</span></th>
+          </tr>
+        </thead>
+        <tbody id="posRows"><tr><td colspan="6" class="loading">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="legend" id="posLegend"></p>
+  </section>
+
+  <h2>Watchlist</h2>
+  <form id="add" autocomplete="off">
+    <input id="symbol" placeholder="Add a ticker, e.g. AAPL" aria-label="Ticker symbol" maxlength="15" required>
+    <button class="primary" id="addBtn">Add</button>
+  </form>
+  <div class="msg" id="msg" role="status"></div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="card">
+    <table>
+      <thead id="watchHead">
+        <tr>
+          <th data-sort="ticker">Stock</th>
+          <th data-sort="price" class="num">Price</th>
+          <th data-sort="change_pct" class="num">Day</th>
+          <th class="col-bar">Stochastic</th>
+          <th data-sort="k" class="num">%K</th>
+          <th data-sort="d" class="num col-d">%D</th>
+          <th data-sort="sma_pct" class="num" id="maHead">50D MA</th>
+          <th class="col-zone">Zone</th>
+          <th><span hidden>Remove</span></th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="9" class="loading">Loading market data…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="legend" id="legend"></p>
+
+  <h2>Alerts &amp; updates</h2>
+  <div class="settings">
+    <div class="card pad">
+      <h3>Phone alerts</h3>
+      <div class="alerts-grid">
+        <img id="qr" alt="QR code for your alert topic">
+        <ol>
+          <li>Install the free <b>ntfy</b> app: <a href="https://apps.apple.com/us/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a> · <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a></li>
+          <li>In the app, tap <b>+</b> and subscribe to <code id="topic">…</code> <button class="small-btn" id="copyTopic" type="button">Copy</button><br><span class="inline-msg" style="margin:0">Or scan the code with your phone's camera.</span></li>
+          <li><button class="small-btn" id="testBtn" type="button">Send a test alert</button><span class="inline-msg" id="testMsg"></span></li>
+        </ol>
+      </div>
+      <label class="check" id="macRow" hidden><input type="checkbox" id="macNotify"> Also show alerts as Mac notifications</label>
+    </div>
+    <div class="card pad">
+      <h3>Schedule</h3>
+      <p id="schedText">Loading…</p>
+      <p id="lastRun"></p>
+      <button class="small-btn" id="runNow" type="button">Run a check now</button><span class="inline-msg" id="runMsg"></span>
+    </div>
+    <div class="card pad">
+      <h3>Version</h3>
+      <p id="verText">Loading…</p>
+      <button class="small-btn" id="updBtn" type="button">Check for updates</button><span class="inline-msg" id="updMsg"></span>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let data = null;
+let sort = { key: null, dir: 1 };
+try { sort = JSON.parse(localStorage.getItem("sort")) || sort; } catch {}
+
+const fmtPrice = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtShares = (n) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+const money = (n) => `${sign(n)}$${fmtPrice(Math.abs(n))}`;
+const pct = (n) => `${sign(n)}${Math.abs(n).toFixed(2)}%`;
+const tone = (n) => (n > 0 ? "up" : n < 0 ? "down" : "");
+const sign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "");
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+async function load(fresh = false) {
+  $("refresh").disabled = true;
+  try {
+    const res = await fetch("/api/stocks" + (fresh ? "?fresh=1" : ""));
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    data = body;
+    render();
+  } catch (e) {
+    if (!data) {
+      $("rows").innerHTML = `<tr><td colspan="9" class="empty">${esc(e.message)}</td></tr>`;
+      $("posRows").innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`;
+    }
+    else $("msg").textContent = e.message;
+  } finally {
+    $("refresh").disabled = false;
+  }
+}
+
+function render() {
+  renderPositions();
+  renderWatchlist();
+}
+
+function renderPositions() {
+  const { holdings, lots, total } = data.positions;
+  const target = data.gain_alert_pct;
+  $("posLegend").textContent = `Total gain/loss compares today's value with what you paid. You'll get a ping once when a position, or your whole portfolio, is up ${target}% or more.`;
+
+  const tile = (label, val, sub, cls = "") => `<div class="tile"><div class="lbl">${label}</div><div class="val ${cls}">${val}${sub ? `<small>${sub}</small>` : ""}</div></div>`;
+  $("tiles").innerHTML = total.value == null
+    ? tile("Market value", "—") + tile("Total gain/loss", "—") + tile("Today", "—")
+    : tile("Market value", `$${fmtPrice(total.value)}`) +
+      tile("Total gain/loss", money(total.gain), pct(total.gain_pct), tone(total.gain)) +
+      tile("Today", money(total.day_gain), "", tone(total.day_gain));
+
+  if (!holdings.length) {
+    $("posRows").innerHTML = `<tr><td colspan="6" class="empty">No positions yet. Add one above, or press + next to a stock in your watchlist.</td></tr>`;
+    return;
+  }
+  const rmBtn = (attrs, label) => `<td class="num"><button class="rm" ${attrs} title="${label}" aria-label="${label}">×</button></td>`;
+  $("posRows").innerHTML = holdings.map((h) => {
+    const t = esc(h.ticker);
+    const sub = `${fmtShares(h.shares)} sh · avg $${fmtPrice(h.avg_cost)}${h.lots > 1 ? ` · ${h.lots} buys` : ""}`;
+    const myLots = lots.filter((l) => l.ticker === h.ticker);
+    const rm = h.lots > 1
+      ? rmBtn(`data-rm-ticker="${t}"`, `Remove all ${t} buys`)
+      : rmBtn(`data-rm-lot="${esc(myLots[0].id)}"`, `Remove ${t} position`);
+    if (h.price == null) {
+      return `<tr class="err"><td class="tk">${t}<span class="sublbl">${sub}</span></td><td colspan="4">No price data</td>${rm}</tr>`;
+    }
+    const hit = h.gain_pct >= target ? `<span class="hit">${target}%+</span>` : "";
+    const row = `<tr>
+      <td class="tk">${t}<span class="sublbl">${sub}</span></td>
+      <td class="num">$${fmtPrice(h.price)}</td>
+      <td class="num col-val">$${fmtPrice(h.value)}</td>
+      <td class="num col-today ${tone(h.day_gain)}">${money(h.day_gain)}</td>
+      <td class="num gain ${tone(h.gain)}">${money(h.gain)}<small>${pct(h.gain_pct)}</small>${hit}</td>
+      ${rm}
+    </tr>`;
+    if (h.lots < 2) return row;
+    return row + myLots.map((l) => `<tr class="lot">
+      <td>${fmtShares(l.shares)} sh @ $${fmtPrice(l.price)}</td>
+      <td class="num"></td>
+      <td class="num col-val">${l.value == null ? "" : "$" + fmtPrice(l.value)}</td>
+      <td class="num col-today">${esc(l.added)}</td>
+      <td class="num ${tone(l.gain)}">${l.gain == null ? "" : `${money(l.gain)} (${pct(l.gain_pct)})`}</td>
+      ${rmBtn(`data-rm-lot="${esc(l.id)}"`, `Remove this ${t} buy`)}
+    </tr>`).join("");
+  }).join("");
+}
+
+function renderWatchlist() {
+  const { stocks, overbought: ob, oversold: os, ma_period: maP } = data;
+  $("maHead").firstChild.textContent = `${maP}D MA`;
+  const t = new Date(data.updated);
+  $("sub").textContent = `Slow stochastic (14, 3, 3) on daily bars · updated ${t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. NEW means the stock entered the zone or crossed below the average since the previous close.`;
+
+  const nOb = stocks.filter((s) => s.zone === "overbought").length;
+  const nOs = stocks.filter((s) => s.zone === "oversold").length;
+  const nBelow = stocks.filter((s) => s.below_sma).length;
+  $("summary").innerHTML =
+    `<span class="chip">${stocks.length} stock${stocks.length === 1 ? "" : "s"}</span>` +
+    (nOb ? `<span class="chip ob">${nOb} overbought</span>` : "") +
+    (nOs ? `<span class="chip os">${nOs} oversold</span>` : "") +
+    (nBelow ? `<span class="chip ma">${nBelow} below ${maP}D MA</span>` : "");
+
+  document.querySelectorAll("th[data-sort]").forEach((th) => {
+    th.querySelector(".arrow")?.remove();
+    if (th.dataset.sort === sort.key) th.insertAdjacentHTML("beforeend", `<span class="arrow">${sort.dir > 0 ? "▲" : "▼"}</span>`);
+  });
+
+  if (!stocks.length) {
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">Your watchlist is empty. Add a ticker above.</td></tr>`;
+    return;
+  }
+
+  const rows = [...stocks];
+  if (sort.key) {
+    rows.sort((a, b) => {
+      const x = a[sort.key], y = b[sort.key];
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (typeof x === "string" ? x.localeCompare(y) : x - y) * sort.dir;
+    });
+  }
+
+  const held = new Set(data.positions.holdings.map((h) => h.ticker));
+  $("rows").innerHTML = rows.map((s) => {
+    const rm = `<td class="num"><button class="rm" data-rm="${esc(s.ticker)}" title="Remove ${esc(s.ticker)} from watchlist" aria-label="Remove ${esc(s.ticker)} from watchlist">×</button></td>`;
+    const pm = held.has(s.ticker)
+      ? `<button class="pm held" data-pos-rm="${esc(s.ticker)}" title="Remove your ${esc(s.ticker)} position" aria-label="Remove your ${esc(s.ticker)} position">−</button>`
+      : `<button class="pm" data-pos-add="${esc(s.ticker)}" title="Add a ${esc(s.ticker)} position" aria-label="Add a ${esc(s.ticker)} position">+</button>`;
+    if (s.error) {
+      return `<tr class="err"><td class="tk">${pm}${esc(s.ticker)}</td><td colspan="7">No data available</td>${rm}</tr>`;
+    }
+    const dir = s.change > 0 ? "up" : s.change < 0 ? "down" : "";
+    const zoneLabel = s.zone === "neutral" ? "Neutral" : s.zone === "overbought" ? "Overbought" : "Oversold";
+    const clamp = (v) => Math.max(0, Math.min(100, v));
+    return `<tr class="${s.zone}">
+      <td class="tk">${pm}${esc(s.ticker)}${s.stale ? '<span class="stale" title="This refresh failed, so this row shows the last data that loaded">last known</span>' : ""}</td>
+      <td class="num">$${fmtPrice(s.price)}</td>
+      <td class="num ${dir}"><span class="chg-abs">${sign(s.change)}${fmtPrice(Math.abs(s.change))} (</span>${sign(s.change)}${Math.abs(s.change_pct).toFixed(2)}%<span class="chg-abs">)</span></td>
+      <td class="col-bar"><div class="bar" title="%K ${s.k.toFixed(1)} · %D ${s.d.toFixed(1)}">
+        <span class="zone-lo" style="width:${os}%"></span><span class="zone-hi" style="width:${100 - ob}%"></span>
+        <span class="dtick" style="left:${clamp(s.d)}%"></span><span class="dot" style="left:${clamp(s.k)}%"></span>
+      </div></td>
+      <td class="num k">${s.k.toFixed(1)}</td>
+      <td class="num col-d">${s.d.toFixed(1)}</td>
+      ${maCell(s)}
+      <td class="col-zone"><span class="badge">${zoneLabel}</span>${s.is_new ? '<span class="new">NEW</span>' : ""}</td>
+      ${rm}
+    </tr>`;
+  }).join("");
+}
+
+function maCell(s) {
+  if (s.sma == null) return `<td class="num ma above" title="Not enough history yet">—</td>`;
+  const below = s.below_sma;
+  const tip = `${data.ma_period}-day MA $${fmtPrice(s.sma)}`;
+  return `<td class="num ma ${below ? "below" : "above"}" title="${tip}">
+    ${below ? "▼" : "▲"} ${Math.abs(s.sma_pct).toFixed(1)}%
+    <span class="lbl">${below ? "below" : "above"} $${fmtPrice(s.sma)}</span>${s.crossed_below ? '<span class="new">NEW</span>' : ""}
+  </td>`;
+}
+
+$("add").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const symbol = $("symbol").value.trim().toUpperCase();
+  if (!symbol) return;
+  $("addBtn").disabled = true;
+  $("addBtn").textContent = "Adding…";
+  $("msg").textContent = "";
+  try {
+    const res = await fetch("/api/tickers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    $("symbol").value = "";
+    await load();
+  } catch (err) {
+    $("msg").textContent = err.message;
+  } finally {
+    $("addBtn").disabled = false;
+    $("addBtn").textContent = "Add";
+    $("symbol").focus();
+  }
+});
+
+// Destructive buttons need a second click within 3 seconds.
+function armed(btn) {
+  if (btn.dataset.armed) return true;
+  const text = btn.textContent;
+  btn.dataset.armed = "1";
+  btn.classList.add("armed");
+  btn.textContent = "Remove?";
+  setTimeout(() => { delete btn.dataset.armed; btn.classList.remove("armed"); btn.textContent = text; }, 3000);
+  return false;
+}
+
+async function removePosition(query, msgEl) {
+  const res = await fetch("/api/positions" + query, { method: "DELETE" });
+  if (!res.ok) msgEl.textContent = (await res.json()).error;
+  await load();
+}
+
+$("rows").addEventListener("click", async (e) => {
+  const add = e.target.closest("[data-pos-add]");
+  if (add) {
+    const s = data.stocks.find((x) => x.ticker === add.dataset.posAdd);
+    $("posTicker").value = s.ticker;
+    $("posPrice").value = s.price != null ? s.price.toFixed(2) : "";
+    $("posShares").value = "";
+    $("posMsg").textContent = "";
+    $("posForm").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("posShares").focus({ preventScroll: true });
+    return;
+  }
+  const minus = e.target.closest("[data-pos-rm]");
+  if (minus) {
+    if (armed(minus)) await removePosition("?ticker=" + encodeURIComponent(minus.dataset.posRm), $("msg"));
+    return;
+  }
+  const btn = e.target.closest("[data-rm]");
+  if (!btn) return;
+  btn.disabled = true;
+  const res = await fetch("/api/tickers/" + encodeURIComponent(btn.dataset.rm), { method: "DELETE" });
+  if (!res.ok) $("msg").textContent = (await res.json()).error;
+  data.stocks = data.stocks.filter((s) => s.ticker !== btn.dataset.rm);
+  render();
+});
+
+$("posRows").addEventListener("click", async (e) => {
+  const lot = e.target.closest("[data-rm-lot]");
+  const all = e.target.closest("[data-rm-ticker]");
+  const btn = lot || all;
+  if (!btn || !armed(btn)) return;
+  btn.disabled = true;
+  await removePosition(lot ? "/" + encodeURIComponent(lot.dataset.rmLot) : "?ticker=" + encodeURIComponent(all.dataset.rmTicker), $("posMsg"));
+});
+
+$("posForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("posBtn").disabled = true;
+  $("posBtn").textContent = "Adding…";
+  $("posMsg").textContent = "";
+  try {
+    const res = await fetch("/api/positions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: $("posTicker").value.trim().toUpperCase(), shares: $("posShares").value, price: $("posPrice").value }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    $("posForm").reset();
+    await load();
+  } catch (err) {
+    $("posMsg").textContent = err.message;
+  } finally {
+    $("posBtn").disabled = false;
+    $("posBtn").textContent = "Add position";
+  }
+});
+
+$("watchHead").addEventListener("click", (e) => {
+  const th = e.target.closest("th[data-sort]");
+  if (!th || !data) return;
+  const key = th.dataset.sort;
+  sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: key === "ticker" ? 1 : -1 };
+  try { localStorage.setItem("sort", JSON.stringify(sort)); } catch {}
+  render();
+});
+
+// ---- Alerts & updates ----
+let status = null;
+const timeOf = (iso) => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+const etLabel = (t) => {
+  const [h, m] = t.split(":").map(Number);
+  return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""}${h < 12 ? "am" : "pm"}`;
+};
+
+async function loadStatus() {
+  try {
+    const res = await fetch("/api/status");
+    if (!res.ok) return;
+    status = await res.json();
+    renderStatus();
+  } catch {}
+}
+
+function renderStatus() {
+  const st = status, s = st.settings;
+  $("topic").textContent = s.ntfy_topic;
+  $("qr").src = "/api/ntfy-qr.svg?t=" + encodeURIComponent(s.ntfy_topic);
+  $("macRow").hidden = st.platform !== "darwin";
+  $("macNotify").checked = s.macos_notify;
+
+  const times = st.schedule.times_et.map(etLabel).join(", ");
+  $("schedText").textContent = `Checks run weekdays at ${times} Eastern while this computer is on. If it was asleep, a missed check runs when it wakes.` +
+    (st.schedule.next ? ` Next check: ${timeOf(st.schedule.next)} your time.` : "");
+  const last = st.schedule.last_run;
+  const outcome = { quiet: "nothing to report", sent: `sent “${last?.title}”`, no_channel: "alert ready but no alert channel set up", error: `failed: ${last?.error}`, empty: "watchlist empty" };
+  $("lastRun").textContent = last ? `Last check: ${timeOf(last.at)} (${outcome[last.status] || last.status}).` : "No checks have run yet.";
+
+  const u = st.update || {};
+  let ver = `Version ${st.version}.`;
+  if (!st.installed) ver += " This is a development copy, so automatic updates are off.";
+  else if (u.status === "current") ver += ` Up to date (checked ${timeOf(u.at)}).`;
+  else if (u.status === "error") ver += ` The last update check failed: ${u.message}`;
+  else if (u.status === "skipped") ver += ` ${u.message}.`;
+  else ver += " Updates install automatically once a day.";
+  $("verText").textContent = ver;
+  $("updBtn").hidden = !st.installed;
+
+  const lu = st.last_update;
+  let seen = null;
+  try { seen = localStorage.getItem("seenUpdate"); } catch {}
+  if (lu && lu.to === st.version && seen !== lu.to) {
+    $("banner").innerHTML = `<div class="banner"><div><b>Updated to version ${esc(lu.to)}.</b>${lu.notes ? `<pre>${esc(lu.notes)}</pre>` : ""}</div><button class="rm" id="dismissUpdate" aria-label="Dismiss">×</button></div>`;
+    $("dismissUpdate").onclick = () => { try { localStorage.setItem("seenUpdate", lu.to); } catch {} $("banner").innerHTML = ""; };
+  }
+}
+
+async function post(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || res.statusText);
+  return out;
+}
+
+$("copyTopic").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(status.settings.ntfy_topic); $("copyTopic").textContent = "Copied"; }
+  catch { $("copyTopic").textContent = "Select it above"; }
+  setTimeout(() => ($("copyTopic").textContent = "Copy"), 2000);
+});
+
+$("testBtn").addEventListener("click", async () => {
+  $("testBtn").disabled = true;
+  $("testMsg").textContent = "Sending…";
+  try { await post("/api/test-notification"); $("testMsg").textContent = "Sent. Check your phone."; }
+  catch (e) { $("testMsg").textContent = e.message; }
+  $("testBtn").disabled = false;
+});
+
+$("macNotify").addEventListener("change", async () => {
+  try { status = await post("/api/settings", { macos_notify: $("macNotify").checked }); renderStatus(); } catch {}
+});
+
+$("runNow").addEventListener("click", async () => {
+  $("runNow").disabled = true;
+  $("runMsg").textContent = "Checking…";
+  try {
+    const r = await post("/api/run-check");
+    $("runMsg").textContent = r.status === "sent" ? `Sent “${r.title}”` : r.status === "quiet" ? "Nothing to report right now." : r.status === "no_channel" ? "Something to report, but no alert channel is set up." : (r.error || r.status);
+  } catch (e) { $("runMsg").textContent = e.message; }
+  $("runNow").disabled = false;
+  loadStatus();
+});
+
+$("updBtn").addEventListener("click", async () => {
+  $("updBtn").disabled = true;
+  $("updMsg").textContent = "Checking…";
+  try {
+    const r = await post("/api/check-updates");
+    if (r.status === "updated") {
+      $("updMsg").textContent = `Installed ${r.latest}. Restarting…`;
+      setTimeout(() => location.reload(), 6000);
+      return;
+    }
+    $("updMsg").textContent = r.status === "current" ? "You're up to date." : (r.message || r.status);
+  } catch (e) { $("updMsg").textContent = e.message; }
+  $("updBtn").disabled = false;
+  loadStatus();
+});
+
+$("refresh").addEventListener("click", () => load(true));
+setInterval(() => { if (!document.hidden) { load(); loadStatus(); } }, 5 * 60 * 1000);
+load();
+loadStatus();
+</script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run pytest -q
+      - name: Build test releases
+        run: uv run python tests/make_release.py "${{ runner.temp }}/rel"
+
+      - name: Install v1 (macOS)
+        if: runner.os == 'macOS'
+        env:
+          STOCK_TRACKER_HOME: ${{ runner.temp }}/st
+          STOCK_TRACKER_ZIP_URL: file://${{ runner.temp }}/rel/v1/stock-tracker.zip
+          STOCK_TRACKER_RELEASES_API: file://${{ runner.temp }}/rel/latest-v2.json
+          STOCK_TRACKER_NO_OPEN: "1"
+        run: sh install.sh
+
+      - name: Install v1 (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          STOCK_TRACKER_HOME: ${{ runner.temp }}\st
+          STOCK_TRACKER_ZIP_URL: ${{ runner.temp }}\rel\v1\stock-tracker.zip
+          STOCK_TRACKER_RELEASES_API: file:///${{ runner.temp }}/rel/latest-v2.json
+          STOCK_TRACKER_NO_OPEN: "1"
+        run: powershell -ExecutionPolicy Bypass -File install.ps1
+
+      - name: Auto-update to the new release
+        run: uv run python tests/e2e_update.py 99.0.0
+
+      - name: Show app log
+        if: always()
+        shell: bash
+        run: cat "${{ runner.temp }}/st/logs/"*.log || true
+
+      - name: Uninstall keeps data (macOS)
+        if: runner.os == 'macOS'
+        env:
+          STOCK_TRACKER_HOME: ${{ runner.temp }}/st
+        run: |
+          sh "$STOCK_TRACKER_HOME/uninstall.sh"
+          test -f "$STOCK_TRACKER_HOME/data/settings.json"
+          ! curl -fs http://127.0.0.1:8050/api/status
+
+      - name: Uninstall keeps data (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          STOCK_TRACKER_HOME: ${{ runner.temp }}\st
+        run: |
+          powershell -ExecutionPolicy Bypass -File "$env:STOCK_TRACKER_HOME\uninstall.ps1"
+          if (-not (Test-Path "$env:STOCK_TRACKER_HOME\data\settings.json")) { throw "data was deleted" }
