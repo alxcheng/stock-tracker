@@ -1,120 +1,97 @@
-# Stochastic Tracker
+# Stock Tracker
 
-Checks a watchlist's **14-day stochastic oscillator** (%K / %D) every 2 hours during US market hours, and pings your phone when a stock is **overbought (%K ≥ 80)** or **oversold (%K ≤ 20)**. It runs entirely on free services.
+A stock watchlist that runs on your own computer. It shows each stock's **14-day stochastic** (green when overbought, red when oversold), how it sits against its **50-day moving average**, and your **positions' gains and losses**. It sends **phone alerts** when something needs attention.
 
-```
-NVDA   OVERSOLD   %K  18.1  %D  23.5  $217.10  NEW
-```
+Everything runs locally, and it's free. The app only talks to Yahoo Finance for prices, ntfy.sh for phone alerts, and GitHub to check for updates.
 
-`NEW` means the stock entered the zone since the previous close. Those alerts go out at high priority.
+## Install
 
-It also watches the **50-day moving average**. When a stock closed above its 50-day MA at the previous close and is trading below it now, it sends a high-priority ping:
-```
-Fell below 50-day MA:
-QQQ    $723.88  50d MA $726.33  (-0.3%)
-```
+**Mac:** open **Terminal** (search for it in Spotlight), paste this line, and press Return:
 
-## Web watchlist
 ```bash
-.venv/bin/python app.py
+curl -fsSL https://github.com/alxcheng/stock-tracker/releases/latest/download/install.sh | sh
 ```
-To keep it running all the time, starting at login and restarting if it crashes, run this once. The log goes to `web.log`.
+
+**Windows:** open **PowerShell** (search for it in the Start menu), paste this line, and press Enter:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/alxcheng/stock-tracker/releases/latest/download/install.ps1 | iex"
+```
+
+It takes about a minute and needs no admin password. When it finishes, the page opens in your browser. Open it again any time from the **Stock Tracker** app (Mac: Launchpad or Spotlight; Windows: desktop or Start menu). It runs in the background and starts by itself when you log in.
+
+## Set up phone alerts (2 minutes)
+
+Scroll to **Alerts & updates** at the bottom of the page:
+1. Install the free **ntfy** app on your phone.
+2. Subscribe to the topic shown on the page. Each install gets its own private topic.
+3. Press **Send a test alert**.
+
+You'll get pings when:
+- a stock on your watchlist is **overbought or oversold**;
+- a stock **drops below its 50-day moving average**;
+- one of your positions, or your whole portfolio, is **up 40% or more**.
+
+Checks run on weekdays at 10am, 12pm, 2pm and 4pm US Eastern while your computer is on. If it was asleep, the missed check runs when it wakes up.
+
+## Updates
+
+Updates install automatically once a day, so there's nothing to do. Each update is downloaded and tested before it's switched on. If a new version fails to start, the app goes back to the previous one on its own. The page shows a short note after an update.
+
+## Uninstall
+
+Your watchlist and positions are kept unless you ask for them to be deleted.
+
+- **Mac:**
+  ```bash
+  ~/"Library/Application Support/Stock Tracker/uninstall.sh"
+  ```
+  Add `--delete-data` to remove everything.
+- **Windows:**
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\StockTracker\uninstall.ps1"
+  ```
+  Add `-DeleteData` to remove everything.
+
+---
+
+## For the maintainer
+
+### How it fits together
+| Piece | What it does |
+|---|---|
+| `app.py` | The local web server at http://127.0.0.1:8050. It runs the alert schedule (`scheduler.py`) and the daily update check (`updater.py`) itself, so each OS only needs one background job. |
+| `tracker.py`, `stoch.py`, `positions.py` | Market data (yfinance), the indicators, positions, and alert logic. |
+| `bootstrap.py` | Started at login: launchd on Mac, the Startup folder with `pythonw` on Windows. It runs the current version, restarts it after updates, and rolls back an update that keeps crashing. Standard library only. |
+| `install.sh`, `install.ps1` | Install `uv` into the user's home folder; uv brings its own Python. They download the release, verify its checksum, install the locked dependencies, run `selftest.py`, and register the background job. |
+
+Install folder: `~/Library/Application Support/Stock Tracker` on Mac, `%LOCALAPPDATA%\StockTracker` on Windows. Code lives in `versions/<version>/`, each with its own `.venv`. The person's data lives in `data/`, which updates never touch.
+
+### Develop
 ```bash
-./install_web_launchd.sh
-```
-Then open http://127.0.0.1:8050. On this page you can:
-- Add and remove tickers.
-- See each stock's price and daily gain/loss.
-- See %K and %D on a 0–100 bar. Overbought rows are **green** and oversold rows are **red**.
-- See how far each stock is above (▲) or below (▼, red) its 50-day MA, with NEW on the day it crosses below.
-
-### Positions
-The **Positions** section at the top tracks what you own. It shows market value, today's gain/loss, and total gain/loss in dollars and percent for each holding and for the whole portfolio.
-- **Add by price:** type the ticker, shares and the price you paid, then click **Add position**. If you buy the same stock more than once, each buy is kept separately and the holding shows your average cost.
-- **+ / − in the watchlist:** **+** fills in the form with that stock at today's price, so you only enter shares. **−** removes your position in that stock; click it twice to confirm.
-- **+40% alert:** the 2-hour job sends one high-priority ping when a holding, or the whole portfolio, reaches +40%. If it drops back below and climbs past again, you get another ping. Change the threshold with `gain_alert_pct` under `[positions]` in `config.toml`.
-
-Positions are saved in `positions.json`, which is git-ignored so your holdings don't end up on GitHub. That means the +40% alert only works in the local (launchd) setup.
-
-Click a column header to sort. The page refreshes every 5 minutes. The list is saved to `watchlist.json`, and the 2-hour alert job reads the same file, so a stock you add on the page gets alerts too.
-
-## How it stays free
-
-| Piece | Choice | Why |
-|---|---|---|
-| Market data | **yfinance** (Yahoo Finance) | No API key and no hard quota. It fetches the whole watchlist in one request. |
-| Scheduler | **GitHub Actions cron** | Free and unlimited for public repos. The workflow re-enables itself so GitHub's 60-day inactivity shutoff never kicks in. |
-| Alerts | **ntfy.sh** | Free push notifications to iOS and Android. No account, one HTTP POST. |
-| Alt. alerts | Discord webhook, Telegram bot, macOS banner | Also free. Turn on any combination. |
-
-### Data alternatives (if Yahoo ever breaks)
-yfinance is unofficial: it scrapes Yahoo and is for personal use. Free keyed APIs that could replace it:
-- **Twelve Data**: about 800 calls/day, 8/min.
-- **Finnhub**: about 60 calls/min. Personal use only.
-- **Alpha Vantage**: only about 25 calls/day, so it fits small watchlists only.
-
-With ~10 tickers checked 4×/day you'd use ~40 calls/day. That fits Twelve Data easily; Alpha Vantage would be tight.
-
-## The math
-
-```
-%K raw = 100 × (Close − Lowest Low₁₄) / (Highest High₁₄ − Lowest Low₁₄)
-%K     = 3-period SMA of %K raw     ← "slow" stochastic, the 14,3,3 most charts show
-%D     = 3-period SMA of %K
-```
-Data is daily bars. During market hours the last bar is today's bar so far, so each 2-hour check uses the latest price. Set `smooth_k = 1` in `config.toml` for the fast stochastic.
-
-## Setup
-
-### 1. Get notifications on your phone (ntfy)
-1. Install the **ntfy** app (App Store / Google Play).
-2. Subscribe to a topic name that's hard to guess, e.g. `stoch-alex-8f3k2q`. Anyone who knows the name can read the topic.
-
-### 2. Option A: run in the cloud with GitHub Actions (recommended, works when your Mac is off)
-```bash
-git init && git add . && git commit -m "Stochastic tracker"
+uv sync
 ```
 ```bash
-gh repo create stochastic-tracker --public --source . --push
+uv run pytest -q
 ```
 ```bash
-gh secret set NTFY_TOPIC --body "stoch-alex-8f3k2q"
+STOCK_TRACKER_PORT=8051 uv run python app.py
 ```
-```bash
-gh workflow run stochastic.yml
-```
-The schedule is weekdays at 14:07, 16:07, 18:07 and 20:07 UTC. That's 10am, 12pm, 2pm and 4pm ET in summer, an hour earlier in winter. GitHub can start scheduled runs 5–30 min late. Each run's table appears in the Actions tab under the job summary.
+A dev checkout keeps its data (`watchlist.json`, `positions.json`, `settings.json`) next to the code. Those files are git-ignored, and automatic updates are off in a dev checkout.
 
-> Private repos also work on the free plan (2,000 min/month, and this uses roughly 80). Some people report that schedules in private repos on free accounts don't fire reliably, so public is the safe choice. The repo holds no secrets; your topic stays in GitHub Secrets.
-
-### 2. Option B: run on this Mac (launchd)
+### Release
 ```bash
-uv venv .venv && uv pip install -p .venv/bin/python -r requirements.txt
+./release.sh 1.1.0 "What changed, in a sentence or two"
 ```
-```bash
-echo 'NTFY_TOPIC=stoch-alex-8f3k2q' > .env
-```
-```bash
-./install_launchd.sh
-```
-By default it runs weekdays at 7:05, 9:05, 11:05 and 13:05 local time (Pacific), which is every 2h across the ET session. It also shows a macOS banner. It only runs while the Mac is awake.
+It runs the tests, bumps `VERSION`, tags the commit, builds `stock-tracker.zip` plus its checksum, and publishes a GitHub release. Every install picks it up within a day. The notes appear in the update banner.
 
-## Configure
-The watchlist is in `watchlist.json`, which the web page edits. It takes any Yahoo symbol: `BRK-B`, `SPY`, `^GSPC`, `BTC-USD`.
+CI (`.github/workflows/ci.yml`) runs the tests on macOS and Windows. On both, it installs a local test release with the real installer and checks that the auto-update switches to a newer one.
 
-Edit `config.toml` for everything else:
-- `period`, `smooth_k`, `d`: the stochastic settings.
-- `overbought`, `oversold`: the thresholds.
-- `line`: alert on `"k"` or `"d"`.
-- `notify_when_quiet`: send a ping even when nothing is flagged.
-- `[moving_average]`: `period` sets the MA length (default 50). Set `alert_on_cross_below = false` to keep the MA on the page but turn off its alerts.
+### Settings
+`config.toml` holds the defaults:
+- stochastic period and thresholds;
+- MA period;
+- the +40% gain alert;
+- schedule times.
 
-Other alert channels are turned on by environment variables or secrets: `DISCORD_WEBHOOK_URL`, or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`.
-
-## Run manually
-```bash
-.venv/bin/python tracker.py --dry-run
-```
-```bash
-.venv/bin/python -m pytest -q
-```
+To change a setting for one person, put a `config.toml` with only the keys that differ in their `data/` folder.
