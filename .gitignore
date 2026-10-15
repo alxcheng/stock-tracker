@@ -12,3 +12,4 @@ dist/
 /schedule_state.json
 /last_update.json
 /.gain_alert_state.json
+/lists.json
