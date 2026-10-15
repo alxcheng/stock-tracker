@@ -4,9 +4,8 @@ Each list: {"id", "name", "tickers": [...], "alerts": {"enabled", "overbought",
 "oversold", "below_ma"}}. The first time this version runs, the old single
 watchlist.json becomes a list called "Watchlist" with every alert on.
 
-Lists can be shared as a code ("ST1-...") or a link to the recipient's own app
-(http://127.0.0.1:8050/#import=ST1-...). The code is compressed JSON in URL-safe
-base64; in a link it sits after "#", so browsers never send it to any server.
+Lists are shared as a code ("ST1-...") that the recipient pastes into Import:
+compressed JSON in URL-safe base64, holding only a name, tickers and alert switches.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import secrets
 import threading
 import zlib
 
-from paths import DATA, DEFAULTS, PORT
+from paths import DATA, DEFAULTS
 
 FILE = DATA / "lists.json"
 LEGACY = DATA / "watchlist.json"
@@ -158,12 +157,8 @@ def share_code(lst: dict) -> str:
     return SHARE_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def share_link(lst: dict) -> str:
-    return f"http://127.0.0.1:{PORT}/#import={share_code(lst)}"
-
-
 def parse_share(text: str) -> dict:
-    """Read a share code or link (also when pasted inside a longer message).
+    """Read a share code, also when it's pasted inside a longer message.
     Returns {"name", "tickers", "alerts"}; raises ValueError if it isn't valid."""
     match = re.search(re.escape(SHARE_PREFIX) + r"([A-Za-z0-9_-]+)", text or "")
     if not match:

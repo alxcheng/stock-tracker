@@ -41,7 +41,7 @@ Checks run on weekdays at 10am, 12pm, 2pm and 4pm US Eastern while your computer
 - **Make as many lists as you like**, such as "Holding", "Ideas" or "Tech", with **+ New list**.
 - **Each list has its own alerts switch.** Choose what it alerts on: overbought, oversold, or dropping below the 50-day average. A list can also stay silent and just be for looking.
 - **Position alerts have their own switch** in the Positions section, where you can change the +40% threshold too.
-- **Share a list:** press **Share** on a list and send the link. When someone with Stock Tracker opens it, their app offers to add the list, with your alert settings as a suggestion. If a link gets mangled in a message, they can paste the code (starts with `ST1-`) into **Import**. The list travels inside the link itself; it isn't uploaded anywhere.
+- **Share a list:** press **Share**, copy the code (it starts with `ST1-`) and send it in any message. The other person presses **Import** and pastes it. The code holds only the list's name, tickers and alert settings; nothing is uploaded anywhere.
 
 ## Updates
 

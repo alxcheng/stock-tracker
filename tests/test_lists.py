@@ -36,12 +36,12 @@ def test_create_rename_delete_and_unique_names(data):
     assert lists.delete(lists.load()[0]["id"]) == "last"
 
 
-def test_share_roundtrip_from_code_or_link_in_a_message(data):
+def test_share_roundtrip_from_code_or_inside_a_message(data):
     lst = {"name": "Ideas", "tickers": ["RIVN", "BRK-B", "^GSPC"],
            "alerts": {"enabled": True, "overbought": False, "oversold": True, "below_ma": False}}
     code = lists.share_code(lst)
     assert code.startswith("ST1-")
-    for text in (code, lists.share_link(lst), f"check these out: {lists.share_link(lst)} !"):
+    for text in (code, f"check these out:\n{code}\ncheers!"):
         got = lists.parse_share(text)
         assert got == {"name": "Ideas", "tickers": lst["tickers"], "alerts": lst["alerts"]}
 

@@ -164,6 +164,28 @@ def with_user_data(payload: dict) -> dict:
     }
 
 
+def request_problem(method: str, headers) -> str | None:
+    """Why to refuse a request that didn't come from this app's own page, or None.
+
+    Any website open in the browser can send requests to 127.0.0.1, so:
+    - Host must name this computer. That stops DNS rebinding, where a site's own
+      name is made to point at 127.0.0.1 so the browser lets it read our replies.
+    - Changes (POST/DELETE) must not come from another site's page (browsers send
+      Origin on those), and POSTs must be JSON, which a page on another site can't
+      send here without a permission check (CORS preflight) that we never grant.
+    """
+    hosts = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+    if (headers.get("Host") or "").lower() not in hosts:
+        return "Requests must be made to 127.0.0.1"
+    if method in ("POST", "DELETE"):
+        origin = (headers.get("Origin") or "").lower()
+        if origin and origin not in {f"http://{h}" for h in hosts}:
+            return "Changes can only be made from the Stock Tracker page"
+        if method == "POST" and not (headers.get("Content-Type") or "").lower().startswith("application/json"):
+            return "Expected JSON"
+    return None
+
+
 def _number(value) -> float | None:
     try:
         n = float(str(value).replace(",", "").replace("$", "").strip())
@@ -184,7 +206,15 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, status: int, obj) -> None:
         self._send(status, json.dumps(obj).encode(), "application/json")
 
+    def _refused(self, method: str) -> bool:
+        problem = request_problem(method, self.headers)
+        if problem:
+            self._json(403, {"error": problem})
+        return problem is not None
+
     def do_GET(self) -> None:
+        if self._refused("GET"):
+            return
         url = urlparse(self.path)
         if url.path == "/":
             self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
@@ -196,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
             lst = lists.get(url.path.split("/")[3])
             if lst is None:
                 return self._json(404, {"error": "List not found"})
-            self._json(200, {"code": lists.share_code(lst), "link": lists.share_link(lst)})
+            self._json(200, {"code": lists.share_code(lst)})
         elif url.path == "/api/stocks":
             try:
                 self._json(200, with_user_data(snapshot(fresh="fresh=1" in url.query)))
@@ -213,6 +243,8 @@ class Handler(BaseHTTPRequestHandler):
         return body
 
     def do_POST(self) -> None:
+        if self._refused("POST"):
+            return
         path = urlparse(self.path).path
         if path == "/api/positions":
             return self.add_position()
@@ -250,13 +282,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Send JSON"})
         if parts == [""]:  # create
             return self._json(201, lists.create(str(body.get("name") or "New list")))
-        if parts in (["preview"], ["import"]):  # a share code or link
+        if parts == ["import"]:  # a pasted share code
             try:
                 shared = lists.parse_share(str(body.get("code") or ""))
             except ValueError as exc:
                 return self._json(400, {"error": str(exc)})
-            if parts == ["preview"]:
-                return self._json(200, shared)
             return self._json(201, lists.create(shared["name"], shared["tickers"], shared["alerts"]))
         list_id = parts[0]
         if len(parts) == 1:  # rename / alert switches
@@ -318,6 +348,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(201, positions.add(symbol, shares, price))
 
     def do_DELETE(self) -> None:
+        if self._refused("DELETE"):
+            return
         url = urlparse(self.path)
         path = url.path
         if path == "/api/positions":  # ?ticker=AAPL removes every lot of that ticker

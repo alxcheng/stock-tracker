@@ -49,7 +49,9 @@
   input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .msg { min-height: 20px; font-size: 13px; color: var(--down); }
 
-  .summary { display: flex; gap: 8px; margin: 8px 0 12px; flex-wrap: wrap; }
+  .summary { display: flex; gap: 8px; margin: 8px 0 12px; flex-wrap: wrap; align-items: center; }
+  .sortby { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+  .sortby select { font: inherit; font-size: 14px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
   .chip { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
   .chip.ob { background: var(--up-bg); color: var(--up); border-color: transparent; font-weight: 600; }
   .chip.os { background: var(--down-bg); color: var(--down); border-color: transparent; font-weight: 600; }
@@ -267,17 +269,12 @@
       <label class="check"><input type="checkbox" data-kind="below_ma"> <span id="maKindLabel">Drops below 50-day MA</span></label>
     </div>
     <div class="panel" id="sharePanel" hidden>
-      <p>Send this link to someone who has Stock Tracker. Opening it on their computer offers to add the list to their app. Its alert settings come along as a suggestion they can change.</p>
-      <div class="copy-row"><code id="shareLink"></code><button class="small-btn" type="button" data-copy="shareLink">Copy link</button></div>
-      <p>If the link doesn't open for them, they can paste this code into <b>Import</b> instead:</p>
-      <div class="copy-row"><code id="shareCode"></code><button class="small-btn" type="button" data-copy="shareCode">Copy code</button></div>
+      <p>Copy this code and send it to someone who has Stock Tracker. They press <b>Import</b> and paste it. The list's alert settings come along; they can change them.</p>
+      <div class="copy-row"><code id="shareCode"></code><button class="small-btn" type="button" data-copy="shareCode">Copy</button></div>
     </div>
     <div class="panel" id="importPanel" hidden>
-      <div id="importPreview"></div>
-      <div id="importPaste">
-        <p>Paste a shared link or code (it starts with ST1-):</p>
-        <textarea id="importText" aria-label="Shared list link or code"></textarea>
-      </div>
+      <p>Paste the code someone shared with you (it starts with ST1-):</p>
+      <textarea id="importText" aria-label="Shared list code"></textarea>
       <div class="list-actions" style="margin-top:8px">
         <button class="small-btn primary" type="button" id="importBtn">Import list</button>
         <button class="small-btn" type="button" id="importCancel">Cancel</button>
@@ -291,7 +288,21 @@
   </form>
   <div class="msg" id="msg" role="status"></div>
 
-  <div class="summary" id="summary"></div>
+  <div class="summary">
+    <span id="summary" style="display:contents"></span>
+    <label class="sortby">Sort by
+      <select id="sortBy">
+        <option value="oversold">Most oversold first</option>
+        <option value="overbought">Most overbought first</option>
+        <option value="below_ma">Furthest below 50-day MA</option>
+        <option value="day_drop">Biggest drop today</option>
+        <option value="day_gain">Biggest gain today</option>
+        <option value="ticker">Ticker (A–Z)</option>
+        <option value="added">Order added</option>
+        <option value="custom" hidden>Column you clicked</option>
+      </select>
+    </label>
+  </div>
 
   <div class="card">
     <table>
@@ -344,8 +355,24 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let data = null;
-let sort = { key: null, dir: 1 };
-try { sort = JSON.parse(localStorage.getItem("sort")) || sort; } catch {}
+// How the stock table is ordered: the Sort by menu, or a clicked column header.
+const SORTS = {
+  oversold: { key: "k", dir: 1 },
+  overbought: { key: "k", dir: -1 },
+  below_ma: { key: "sma_pct", dir: 1 },
+  day_drop: { key: "change_pct", dir: 1 },
+  day_gain: { key: "change_pct", dir: -1 },
+  ticker: { key: "ticker", dir: 1 },
+  added: { key: null, dir: 1 },
+};
+let sort = SORTS.oversold;
+try { sort = JSON.parse(localStorage.getItem("sortOrder")) || sort; } catch {}
+const sortName = () => Object.keys(SORTS).find((n) => SORTS[n].key === sort.key && SORTS[n].dir === sort.dir) || "custom";
+function setSort(next) {
+  sort = next;
+  try { localStorage.setItem("sortOrder", JSON.stringify(sort)); } catch {}
+  render();
+}
 
 const fmtPrice = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtShares = (n) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -486,7 +513,7 @@ $("tabs").addEventListener("click", async (e) => {
     startRename();
     return;
   }
-  if (e.target.closest("#importOpenBtn")) openImport("");
+  if (e.target.closest("#importOpenBtn")) openImport();
 });
 
 $("alertsOn").addEventListener("change", () => saveList({ alerts: { enabled: $("alertsOn").checked } }));
@@ -525,7 +552,6 @@ $("shareBtn").addEventListener("click", async () => {
   if (!$("sharePanel").hidden) { $("sharePanel").hidden = true; return; }
   $("importPanel").hidden = true;
   const out = await api("GET", `/api/lists/${activeList().id}/share`);
-  $("shareLink").textContent = out.link;
   $("shareCode").textContent = out.code;
   $("sharePanel").hidden = false;
 });
@@ -539,51 +565,27 @@ document.addEventListener("click", async (e) => {
   setTimeout(() => (btn.textContent = label), 2000);
 });
 
-// Importing: from a pasted code, or from a share link that opened this page (#import=ST1-...).
-let pendingImport = "";
-async function openImport(code) {
+// Importing a list someone shared: they send a code, you paste it here.
+function openImport() {
   $("sharePanel").hidden = true;
   $("importPanel").hidden = false;
   $("importMsg").textContent = "";
-  $("importPreview").innerHTML = "";
-  $("importPaste").hidden = !!code;
-  pendingImport = code;
-  if (!code) { $("importText").value = ""; $("importText").focus(); return; }
-  try {
-    const p = await api("POST", "/api/lists/preview", { code });
-    const kinds = ["overbought", "oversold", "below_ma"].filter((k) => p.alerts[k])
-      .map((k) => ({ overbought: "overbought", oversold: "oversold", below_ma: `below ${data.ma_period}-day MA` })[k]);
-    $("importPreview").innerHTML = `<p style="color:var(--text)">Someone shared the list <b>${esc(p.name)}</b> with you: ${p.tickers.length} stock${p.tickers.length === 1 ? "" : "s"}.</p>
-      <p>${p.tickers.map(esc).join(", ")}</p>
-      <p>Suggested alerts: ${p.alerts.enabled && kinds.length ? kinds.join(", ") : "off"}. You can change them after importing.</p>`;
-  } catch (err) {
-    $("importPreview").innerHTML = `<p class="down">${esc(err.message)}</p>`;
-    pendingImport = "";
-  }
+  $("importText").value = "";
+  $("importText").focus();
 }
-$("importCancel").addEventListener("click", () => { $("importPanel").hidden = true; pendingImport = ""; });
+$("importCancel").addEventListener("click", () => { $("importPanel").hidden = true; });
 $("importBtn").addEventListener("click", async () => {
-  const code = pendingImport || $("importText").value;
   $("importBtn").disabled = true;
   try {
-    const lst = await api("POST", "/api/lists/import", { code });
+    const lst = await api("POST", "/api/lists/import", { code: $("importText").value });
     $("importPanel").hidden = true;
-    pendingImport = "";
     activeId = lst.id;
     try { localStorage.setItem("activeList", lst.id); } catch {}
     await load();
-    $("msg").textContent = `Imported “${lst.name}”.`;
+    $("msg").textContent = `Added “${lst.name}” (${lst.tickers.length} stock${lst.tickers.length === 1 ? "" : "s"}). Its alert settings are the sharer's; change them above if you like.`;
   } catch (err) { $("importMsg").textContent = err.message; }
   $("importBtn").disabled = false;
 });
-
-function checkImportLink() {
-  const m = location.hash.match(/import=(ST1-[A-Za-z0-9_-]+)/);
-  if (!m) return;
-  history.replaceState(null, "", location.pathname);
-  openImport(m[1]);
-  $("importPanel").scrollIntoView({ block: "center" });
-}
 
 // ---- Position alert settings ----
 async function savePositionAlerts(body) {
@@ -627,6 +629,7 @@ function renderWatchlist() {
   }
 
   const rows = [...stocks];
+  $("sortBy").value = sortName();
   if (sort.key) {
     rows.sort((a, b) => {
       const x = a[sort.key], y = b[sort.key];
@@ -781,10 +784,9 @@ $("watchHead").addEventListener("click", (e) => {
   const th = e.target.closest("th[data-sort]");
   if (!th || !data) return;
   const key = th.dataset.sort;
-  sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: key === "ticker" ? 1 : -1 };
-  try { localStorage.setItem("sort", JSON.stringify(sort)); } catch {}
-  render();
+  setSort(sort.key === key ? { key, dir: -sort.dir } : { key, dir: key === "ticker" ? 1 : -1 });
 });
+$("sortBy").addEventListener("change", () => setSort(SORTS[$("sortBy").value] || SORTS.oversold));
 
 // ---- Alerts & updates ----
 let status = null;
@@ -890,8 +892,7 @@ $("updBtn").addEventListener("click", async () => {
 
 $("refresh").addEventListener("click", () => load(true));
 setInterval(() => { if (!document.hidden) { load(); loadStatus(); } }, 5 * 60 * 1000);
-load().then(checkImportLink);
-window.addEventListener("hashchange", checkImportLink);
+load();
 loadStatus();
 </script>
 </body>
