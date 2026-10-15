@@ -12,7 +12,7 @@ uv run pytest -q
 printf '%s\n' "$V" > VERSION
 sed -i '' "s/^version = .*/version = \"$V\"/" pyproject.toml
 uv lock -q
-git commit -qam "Release $V"
+git diff --quiet || git commit -qam "Release $V"
 git tag "v$V"
 
 rm -rf dist && mkdir dist
