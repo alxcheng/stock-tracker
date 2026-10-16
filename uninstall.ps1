@@ -7,8 +7,11 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 1
 Remove-Item (Join-Path ([Environment]::GetFolderPath("Startup")) "Stock Tracker (background).lnk") -ErrorAction SilentlyContinue
-Remove-Item (Join-Path ([Environment]::GetFolderPath("Programs")) "Stock Tracker.url") -ErrorAction SilentlyContinue
-Remove-Item (Join-Path ([Environment]::GetFolderPath("Desktop")) "Stock Tracker.url") -ErrorAction SilentlyContinue
+foreach ($dir in [Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop")) {
+    foreach ($name in "Stock Tracker.lnk", "Stock Tracker.url") {
+        Remove-Item (Join-Path $dir $name) -ErrorAction SilentlyContinue
+    }
+}
 if ($DeleteData) {
     Remove-Item -Recurse -Force $Root -ErrorAction SilentlyContinue
     Write-Host "Stock Tracker and all its data were removed."

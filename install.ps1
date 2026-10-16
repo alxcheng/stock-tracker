@@ -65,6 +65,8 @@ Set-Content $CurrentFile $Version
 Remove-Item (Join-Path $Root "trial.txt") -ErrorAction SilentlyContinue
 @{ uv = $Uv; repo = $Repo; port = $Port; releases_api = "$env:STOCK_TRACKER_RELEASES_API" } | ConvertTo-Json | Set-Content (Join-Path $Root "install.json")
 Copy-Item (Join-Path $VDir "bootstrap.py"), (Join-Path $VDir "uninstall.ps1") $Root -Force
+# The app creates its shortcuts (Desktop, Start menu, Startup folder) when it starts.
+Remove-Item (Join-Path $Root "desktop.txt") -ErrorAction SilentlyContinue
 
 $Py = (& $Uv python find 3.12).Trim()
 $Pyw = Join-Path (Split-Path $Py) "pythonw.exe"
@@ -72,21 +74,7 @@ if (-not (Test-Path $Pyw)) { Fail "Couldn't find pythonw.exe next to $Py" }
 $Bootstrap = Join-Path $Root "bootstrap.py"
 
 Say "Starting Stock Tracker in the background (it also starts when you sign in)"
-$Shell = New-Object -ComObject WScript.Shell
-$Startup = [Environment]::GetFolderPath("Startup")
-$Lnk = $Shell.CreateShortcut((Join-Path $Startup "Stock Tracker (background).lnk"))
-$Lnk.TargetPath = $Pyw
-$Lnk.Arguments = "`"$Bootstrap`""
-$Lnk.WorkingDirectory = $Root
-$Lnk.WindowStyle = 7
-$Lnk.Save()
 Start-Process -FilePath $Pyw -ArgumentList "`"$Bootstrap`"" -WorkingDirectory $Root -WindowStyle Hidden
-
-# Shortcuts that open the page.
-$Shortcut = "[InternetShortcut]`r`nURL=$Url/`r`n"
-$Programs = [Environment]::GetFolderPath("Programs")
-Set-Content -Path (Join-Path $Programs "Stock Tracker.url") -Value $Shortcut
-Set-Content -Path (Join-Path ([Environment]::GetFolderPath("Desktop")) "Stock Tracker.url") -Value $Shortcut
 
 Write-Host -NoNewline "Waiting for it to start"
 $ok = $false

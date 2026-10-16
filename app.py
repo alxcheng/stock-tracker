@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import desktop
 import lists
 import notifiers
 import paths
@@ -275,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/":
             self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
+        elif url.path == "/favicon.ico":
+            self._send(200, (HERE / "web" / "icon.ico").read_bytes(), "image/x-icon")
         elif url.path == "/api/status":
             self._json(200, status_payload())
         elif url.path == "/api/ntfy-qr.svg":
@@ -506,6 +509,7 @@ def main() -> int:
     settings.ensure()
     _server = Server(("127.0.0.1", PORT), Handler)
     watch_parent()
+    threading.Thread(target=desktop.ensure_quietly, name="desktop", daemon=True).start()
     start_market_loop()
     scheduler.start(run_check_now, schedule_times)
     updater.start(request_restart)

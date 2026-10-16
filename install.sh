@@ -61,8 +61,9 @@ CURRENT="$(cat "$ROOT/current.txt" 2>/dev/null || true)"
 if [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ]; then printf '%s\n' "$CURRENT" > "$ROOT/previous.txt"; fi
 printf '%s\n' "$VERSION" > "$ROOT/current.txt"
 rm -f "$ROOT/trial.txt"
-printf '{"uv": "%s", "repo": "%s", "port": %s, "releases_api": "%s"}\n' \
-  "$UV" "$REPO" "$PORT" "${STOCK_TRACKER_RELEASES_API:-}" > "$ROOT/install.json"
+printf '{"uv": "%s", "repo": "%s", "port": %s, "releases_api": "%s", "label": "%s", "app": "%s"}\n' \
+  "$UV" "$REPO" "$PORT" "${STOCK_TRACKER_RELEASES_API:-}" "$LABEL" "$APP" > "$ROOT/install.json"
+rm -f "$ROOT/desktop.txt"  # the app (re)creates its launcher in ~/Applications when it starts
 cp "$VDIR/bootstrap.py" "$VDIR/uninstall.sh" "$ROOT/"
 chmod +x "$ROOT/uninstall.sh"
 PY="$("$UV" python find 3.12)"
@@ -83,11 +84,6 @@ cat > "$PLIST" <<PLIST
 </dict></plist>
 PLIST
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-
-# A small app in ~/Applications that opens the page (find it in Launchpad or Spotlight).
-mkdir -p "$HOME/Applications"
-rm -rf "$APP"
-osacompile -o "$APP" -e "open location \"$URL\"" >/dev/null 2>&1 || true
 
 printf 'Waiting for it to start'
 i=0
