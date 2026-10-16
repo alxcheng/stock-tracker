@@ -43,6 +43,38 @@ jobs:
       - name: Auto-update to the new release
         run: uv run python tests/e2e_update.py 99.0.0
 
+      - name: Launcher app exists (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for i in $(seq 1 30); do [ -d "$HOME/Applications/Stock Tracker.app" ] && break; sleep 1; done
+          test -d "$HOME/Applications/Stock Tracker.app"
+
+      - name: Shortcut starts the app, and only once (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          STOCK_TRACKER_HOME: ${{ runner.temp }}\st
+          STOCK_TRACKER_NO_OPEN: "1"
+        run: |
+          $root = $env:STOCK_TRACKER_HOME
+          $desk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Stock Tracker.lnk'
+          for ($i = 0; $i -lt 30 -and -not (Test-Path $desk); $i++) { Start-Sleep 1 }
+          if (-not (Test-Path $desk)) { throw "no Desktop shortcut" }
+          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('Startup')) 'Stock Tracker (background).lnk'))) { throw "no Startup shortcut" }
+          $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($desk)
+          "shortcut runs: $($lnk.TargetPath) $($lnk.Arguments)"
+          function Running { @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($root) }) }
+          Running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+          Start-Sleep 2
+          # WaitForExit waits for the launcher only, not the app it starts.
+          (Start-Process $lnk.TargetPath -ArgumentList $lnk.Arguments -PassThru).WaitForExit()
+          Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8050/api/status | Out-Null
+          (Start-Process $lnk.TargetPath -ArgumentList $lnk.Arguments -PassThru).WaitForExit()
+          Start-Sleep 2
+          $boots = @(Running | Where-Object { $_.CommandLine.Contains('bootstrap.py') })
+          if ($boots.Count -ne 1) { throw "expected 1 copy running, found $($boots.Count)" }
+          "OK: the shortcut started the app, and opening it again didn't start a second copy"
+
       - name: Show app log
         if: always()
         shell: bash
@@ -55,6 +87,7 @@ jobs:
         run: |
           sh "$STOCK_TRACKER_HOME/uninstall.sh"
           test -f "$STOCK_TRACKER_HOME/data/settings.json"
+          test ! -e "$HOME/Applications/Stock Tracker.app"
           ! curl -fs http://127.0.0.1:8050/api/status
 
       - name: Uninstall keeps data (Windows)
@@ -65,3 +98,4 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass -File "$env:STOCK_TRACKER_HOME\uninstall.ps1"
           if (-not (Test-Path "$env:STOCK_TRACKER_HOME\data\settings.json")) { throw "data was deleted" }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Stock Tracker.lnk')) { throw "Desktop shortcut left behind" }
