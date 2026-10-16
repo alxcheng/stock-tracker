@@ -145,6 +145,7 @@ def snapshot() -> dict:
         "overbought": cfg["alerts"]["overbought"],
         "oversold": cfg["alerts"]["oversold"],
         "ma_period": tracker.ma_settings(cfg)["period"],
+        "highlight_below_ma_pct": float(cfg.get("highlight", {}).get("below_ma_pct", 15)),
         "stocks": rows,
     }
 

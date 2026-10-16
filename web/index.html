@@ -61,19 +61,18 @@
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th {
     text-align: left; font-size: 12px; font-weight: 600; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .04em; padding: 10px 14px;
+    text-transform: uppercase; letter-spacing: .04em; padding: 10px 11px;
     border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none;
   }
   th[data-sort] { cursor: pointer; }
   th[data-sort]:hover { color: var(--text); }
   th .arrow { font-size: 10px; margin-left: 2px; }
-  td { padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 12px 11px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   tr:last-child td { border-bottom: 0; }
   .num { text-align: right; }
-  tr.overbought td { background: var(--up-bg); }
-  tr.oversold td { background: var(--down-bg); }
-  tr.overbought td:first-child { box-shadow: inset 3px 0 var(--up-strong); }
-  tr.oversold td:first-child { box-shadow: inset 3px 0 var(--down-strong); }
+  /* Whole-row highlight: oversold and far below the 50-day MA (see highlightRow). */
+  tr.highlight td { background: var(--down-bg); }
+  tr.highlight td:first-child { box-shadow: inset 3px 0 var(--down-strong); }
   .tk { font-weight: 700; letter-spacing: .01em; }
   .up { color: var(--up); }
   .down { color: var(--down); }
@@ -84,10 +83,11 @@
   .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; color: var(--muted); }
   .overbought .badge { background: var(--up-strong); color: #fff; }
   .oversold .badge { background: var(--down-strong); color: #fff; }
+  .col-zone .new { display: block; margin: 2px 0 0; }
   .stale { display: block; font-size: 10px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
   .new { font-size: 10px; font-weight: 700; margin-left: 6px; letter-spacing: .05em; }
 
-  .bar { position: relative; width: 140px; height: 8px; border-radius: 4px; background: var(--track); }
+  .bar { position: relative; width: 104px; height: 8px; border-radius: 4px; background: var(--track); }
   .bar .zone-lo, .bar .zone-hi { position: absolute; top: 0; bottom: 0; opacity: .35; }
   .bar .zone-lo { left: 0; background: var(--down-strong); border-radius: 4px 0 0 4px; }
   .bar .zone-hi { right: 0; background: var(--up-strong); border-radius: 0 4px 4px 0; }
@@ -622,7 +622,7 @@ function renderWatchlist() {
   if (data.backoff_until) {
     $("marketNote").textContent = `Yahoo is limiting requests, so updates are paused until ${clock(data.backoff_until)}. Showing the last prices.`;
   }
-  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. NEW means the stock entered the zone or crossed below the average since the previous close.`;
+  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. A highlighted row is oversold and at least ${data.highlight_below_ma_pct}% below its ${maP}-day MA. NEW means the stock entered the zone or crossed below the average since the previous close.`;
 
   const nOb = stocks.filter((s) => s.zone === "overbought").length;
   const nOs = stocks.filter((s) => s.zone === "oversold").length;
@@ -666,7 +666,7 @@ function renderWatchlist() {
     const dir = s.change > 0 ? "up" : s.change < 0 ? "down" : "";
     const zoneLabel = s.zone === "neutral" ? "Neutral" : s.zone === "overbought" ? "Overbought" : "Oversold";
     const clamp = (v) => Math.max(0, Math.min(100, v));
-    return `<tr class="${s.zone}">
+    return `<tr class="${s.zone}${highlightRow(s) ? " highlight" : ""}">
       <td class="tk">${pm}${esc(s.ticker)}${s.stale ? '<span class="stale" title="The last update for this stock failed, so this row shows the last data that loaded">last known</span>' : ""}</td>
       <td class="num">$${fmtPrice(s.price)}</td>
       <td class="num ${dir}"><span class="chg-abs">${sign(s.change)}${fmtPrice(Math.abs(s.change))} (</span>${sign(s.change)}${Math.abs(s.change_pct).toFixed(2)}%<span class="chg-abs">)</span></td>
@@ -681,6 +681,12 @@ function renderWatchlist() {
       ${rm}
     </tr>`;
   }).join("");
+}
+
+// Highlight the whole row only when a stock is both oversold and at least
+// highlight_below_ma_pct (15% by default) below its 50-day moving average.
+function highlightRow(s) {
+  return s.zone === "oversold" && s.sma_pct != null && s.sma_pct <= -data.highlight_below_ma_pct;
 }
 
 function maCell(s) {
