@@ -1,6 +1,6 @@
 # Stock Tracker
 
-A stock watchlist that runs on your own computer. It shows each stock's **14-day stochastic** (green when overbought, red when oversold), how it sits against its **50-day moving average**, and your **positions' gains and losses**. It sends **phone alerts** when something needs attention.
+A stock watchlist that runs on your own computer. It shows each stock's **14-day stochastic** (green when overbought, red when oversold), how it sits against its **50-day moving average**, a red ✝ for a **death cross** (50-day average below the 200-day), and your **positions' gains and losses**. It sends **phone alerts** when something needs attention.
 
 Everything runs locally, and it's free. The app only talks to Yahoo Finance for prices, ntfy.sh for phone alerts, and GitHub to check for updates.
 

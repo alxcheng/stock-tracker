@@ -54,6 +54,10 @@ class Reading:
     prev_zone: str  # zone at the previous daily close
     sma: float | None = None  # N-day simple moving average of the close
     crossed_below: bool = False  # closed above the MA last session, below it now
+    sma_long: float | None = None  # long (200-day) moving average
+    death_cross: bool = False  # the 50-day MA is below the 200-day MA
+    death_cross_since: str | None = None  # date the 50-day dipped below, if within the data
+    death_cross_before: str | None = None  # otherwise: it was already below on this date
 
     @property
     def change(self) -> float:
@@ -104,7 +108,7 @@ def _rate_limited(text: str) -> bool:
     return "too many requests" in text or "rate limit" in text or "ratelimit" in text
 
 
-def fetch(tickers: list[str], threads: bool = True, period: str = "6mo") -> dict[str, pd.DataFrame]:
+def fetch(tickers: list[str], threads: bool = True, period: str = "1y") -> dict[str, pd.DataFrame]:
     """Daily OHLC for each ticker. During market hours the last row is today's
     in-progress bar, so the reading reflects the latest price.
 
@@ -150,7 +154,8 @@ def fetch(tickers: list[str], threads: bool = True, period: str = "6mo") -> dict
 def analyze(data: dict[str, pd.DataFrame], cfg: dict) -> tuple[list[Reading], list[str]]:
     s, a = cfg["stochastic"], cfg["alerts"]
     line = a.get("line", "k")
-    ma_period = ma_settings(cfg)["period"]
+    ma = ma_settings(cfg)
+    ma_period = ma["period"]
     readings, skipped = [], []
     for ticker, df in data.items():
         st = stochastic(df, s["period"], s["smooth_k"], s["d"]).dropna()
@@ -162,6 +167,7 @@ def analyze(data: dict[str, pd.DataFrame], cfg: dict) -> tuple[list[Reading], li
         sma_now, sma_prev = sma.iloc[-1], sma.iloc[-2]
         price, prev_close = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
         has_sma = pd.notna(sma_now) and pd.notna(sma_prev)
+        sma_long, death, since, before = death_cross(sma, df["Close"].rolling(ma["long_period"]).mean())
         readings.append(
             Reading(
                 ticker=ticker,
@@ -173,13 +179,39 @@ def analyze(data: dict[str, pd.DataFrame], cfg: dict) -> tuple[list[Reading], li
                 prev_zone=zone(prev[line], a["overbought"], a["oversold"]),
                 sma=float(sma_now) if has_sma else None,
                 crossed_below=bool(has_sma and prev_close >= sma_prev and price < sma_now),
+                sma_long=sma_long,
+                death_cross=death,
+                death_cross_since=since,
+                death_cross_before=before,
             )
         )
     return readings, skipped
 
 
+def death_cross(short: pd.Series, long: pd.Series) -> tuple[float | None, bool, str | None, str | None]:
+    """(latest long MA, whether the short MA is below it, date it went below,
+    or else the earliest date we can see it was already below).
+
+    The long average only exists once there's enough history, so a cross older
+    than that has no date; "already below on <date>" is the most we can say.
+    """
+    both = pd.concat([short, long], axis=1).dropna()
+    if both.empty:
+        return None, False, None, None
+    below = both.iloc[:, 0] < both.iloc[:, 1]
+    long_now = float(both.iloc[-1, 1])
+    if not below.iloc[-1]:
+        return long_now, False, None, None
+    day = lambda ts: pd.Timestamp(ts).date().isoformat()  # noqa: E731
+    above_days = below[~below]
+    if above_days.empty:
+        return long_now, True, None, day(below.index[0])
+    first_below = below.index[below.index.get_loc(above_days.index[-1]) + 1]
+    return long_now, True, day(first_below), None
+
+
 def ma_settings(cfg: dict) -> dict:
-    return {"period": 50, **cfg.get("moving_average", {})}
+    return {"period": 50, "long_period": 200, **cfg.get("moving_average", {})}
 
 
 def position_settings(cfg: dict, user: dict | None = None) -> dict:

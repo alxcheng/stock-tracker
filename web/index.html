@@ -84,6 +84,8 @@
   .overbought .badge { background: var(--up-strong); color: #fff; }
   .oversold .badge { background: var(--down-strong); color: #fff; }
   .col-zone .new { display: block; margin: 2px 0 0; }
+  .dc { display: inline-block; width: 10px; height: 14px; margin-left: 6px; vertical-align: -2px; fill: var(--down-strong); cursor: help; }
+  .chip.dc-chip { background: var(--surface); color: var(--down); border-color: var(--down); }
   .stale { display: block; font-size: 10px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
   .new { font-size: 10px; font-weight: 700; margin-left: 6px; letter-spacing: .05em; }
 
@@ -622,16 +624,18 @@ function renderWatchlist() {
   if (data.backoff_until) {
     $("marketNote").textContent = `Yahoo is limiting requests, so updates are paused until ${clock(data.backoff_until)}. Showing the last prices.`;
   }
-  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. A highlighted row is oversold and at least ${data.highlight_below_ma_pct}% below its ${maP}-day MA. NEW means the stock entered the zone or crossed below the average since the previous close.`;
+  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. A red cross ✝ next to a ticker is a death cross: its ${maP}-day average is below its ${data.ma_long_period}-day average. A highlighted row is oversold and at least ${data.highlight_below_ma_pct}% below its ${maP}-day MA. NEW means the stock entered the zone or crossed below the average since the previous close.`;
 
   const nOb = stocks.filter((s) => s.zone === "overbought").length;
   const nOs = stocks.filter((s) => s.zone === "oversold").length;
   const nBelow = stocks.filter((s) => s.below_sma).length;
+  const nCross = stocks.filter((s) => s.death_cross).length;
   $("summary").innerHTML =
     `<span class="chip">${stocks.length} stock${stocks.length === 1 ? "" : "s"}</span>` +
     (nOb ? `<span class="chip ob">${nOb} overbought</span>` : "") +
     (nOs ? `<span class="chip os">${nOs} oversold</span>` : "") +
-    (nBelow ? `<span class="chip ma">${nBelow} below ${maP}D MA</span>` : "");
+    (nBelow ? `<span class="chip ma">${nBelow} below ${maP}D MA</span>` : "") +
+    (nCross ? `<span class="chip dc-chip">${nCross} death cross${nCross === 1 ? "" : "es"}</span>` : "");
 
   document.querySelectorAll("th[data-sort]").forEach((th) => {
     th.querySelector(".arrow")?.remove();
@@ -667,7 +671,7 @@ function renderWatchlist() {
     const zoneLabel = s.zone === "neutral" ? "Neutral" : s.zone === "overbought" ? "Overbought" : "Oversold";
     const clamp = (v) => Math.max(0, Math.min(100, v));
     return `<tr class="${s.zone}${highlightRow(s) ? " highlight" : ""}">
-      <td class="tk">${pm}${esc(s.ticker)}${s.stale ? '<span class="stale" title="The last update for this stock failed, so this row shows the last data that loaded">last known</span>' : ""}</td>
+      <td class="tk">${pm}${esc(s.ticker)}${s.death_cross ? deathCrossIcon(s) : ""}${s.stale ? '<span class="stale" title="The last update for this stock failed, so this row shows the last data that loaded">last known</span>' : ""}</td>
       <td class="num">$${fmtPrice(s.price)}</td>
       <td class="num ${dir}"><span class="chg-abs">${sign(s.change)}${fmtPrice(Math.abs(s.change))} (</span>${sign(s.change)}${Math.abs(s.change_pct).toFixed(2)}%<span class="chg-abs">)</span></td>
       <td class="col-bar"><div class="bar" title="%K ${s.k.toFixed(1)} · %D ${s.d.toFixed(1)}">
@@ -687,6 +691,15 @@ function renderWatchlist() {
 // highlight_below_ma_pct (15% by default) below its 50-day moving average.
 function highlightRow(s) {
   return s.zone === "oversold" && s.sma_pct != null && s.sma_pct <= -data.highlight_below_ma_pct;
+}
+
+// Red cross next to the ticker: the 50-day MA is below the 200-day MA ("death cross").
+function deathCrossIcon(s) {
+  const day = (iso) => new Date(iso + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const since = s.death_cross_since ? ` since ${day(s.death_cross_since)}`
+    : s.death_cross_before ? ` since before ${day(s.death_cross_before)}` : "";
+  const tip = `Death cross${since}: the ${data.ma_period}-day average ($${fmtPrice(s.sma)}) is below the ${data.ma_long_period}-day average ($${fmtPrice(s.sma_long)}).`;
+  return `<svg class="dc" viewBox="0 0 10 14" role="img" aria-label="${tip}"><title>${tip}</title><path d="M4 0h2v4h4v2H6v8H4V6H0V4h4z"/></svg>`;
 }
 
 function maCell(s) {

@@ -15,6 +15,7 @@ notify_when_quiet = false
 
 [moving_average]
 period = 50  # trading days. Which lists alert on a drop below it is set per list on the page.
+long_period = 200  # a "death cross" is the 50-day average falling below this one
 
 [highlight]
 below_ma_pct = 15  # highlight a whole row when it's oversold AND at least this far below the 50-day MA

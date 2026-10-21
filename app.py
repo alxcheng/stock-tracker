@@ -107,6 +107,10 @@ def stock_rows() -> dict[str, dict]:
                     "sma_pct": r.sma_pct,
                     "below_sma": r.below_sma,
                     "crossed_below": r.crossed_below,
+                    "sma_long": r.sma_long,
+                    "death_cross": r.death_cross,
+                    "death_cross_since": r.death_cross_since,
+                    "death_cross_before": r.death_cross_before,
                 }
                 for r in readings
             }
@@ -145,6 +149,7 @@ def snapshot() -> dict:
         "overbought": cfg["alerts"]["overbought"],
         "oversold": cfg["alerts"]["oversold"],
         "ma_period": tracker.ma_settings(cfg)["period"],
+        "ma_long_period": tracker.ma_settings(cfg)["long_period"],
         "highlight_below_ma_pct": float(cfg.get("highlight", {}).get("below_ma_pct", 15)),
         "stocks": rows,
     }

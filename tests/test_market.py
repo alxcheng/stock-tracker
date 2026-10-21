@@ -32,8 +32,8 @@ class FakeYahoo:
         self.calls.append((tuple(tickers), period))
         if self.limit:
             raise RateLimited("Too many requests")
-        days = 130 if period == "6mo" else 5
-        return {t: bars(days, start="2026-04-20" if period == "6mo" else "2026-10-09", close=200.0) for t in tickers}
+        days = 130 if period == market.HISTORY else 5
+        return {t: bars(days, start="2026-04-20" if period == market.HISTORY else "2026-10-09", close=200.0) for t in tickers}
 
 
 def test_market_hours_and_last_close():
@@ -49,14 +49,14 @@ def test_schedule_full_every_15_price_every_5():
     yahoo = FakeYahoo()
     m = Market(yahoo)
     assert m.refresh(["A", "B"], THU_NOON) == "updated"
-    assert yahoo.calls == [(("A", "B"), "6mo")]
+    assert yahoo.calls == [(("A", "B"), market.HISTORY)]
     assert m.refresh(["A", "B"], THU_NOON + timedelta(minutes=3)) == "idle"
     m.refresh(["A", "B"], THU_NOON + timedelta(minutes=5))
     assert yahoo.calls[-1] == (("A", "B"), "5d")
     m.refresh(["A", "B"], THU_NOON + timedelta(minutes=10))
     assert yahoo.calls[-1] == (("A", "B"), "5d")
     m.refresh(["A", "B"], THU_NOON + timedelta(minutes=15))
-    assert yahoo.calls[-1] == (("A", "B"), "6mo")
+    assert yahoo.calls[-1] == (("A", "B"), market.HISTORY)
     assert len(yahoo.calls) == 4
 
 
@@ -65,7 +65,7 @@ def test_new_stock_fetched_right_away_without_refetching_others():
     m = Market(yahoo)
     m.refresh(["A"], THU_NOON)
     m.refresh(["A", "NEW"], THU_NOON + timedelta(minutes=1))
-    assert yahoo.calls[-1] == (("NEW",), "6mo")
+    assert yahoo.calls[-1] == (("NEW",), market.HISTORY)
     assert m.overdue(["A", "NEW"], THU_NOON + timedelta(minutes=1)) is False
 
 
@@ -115,7 +115,7 @@ def test_failed_ticker_waits_for_next_interval():
     m.refresh(["GONE"], THU_NOON)
     for minutes in (1, 5, 10):
         m.refresh(["GONE"], THU_NOON + timedelta(minutes=minutes))
-    assert calls == ["6mo"]
+    assert calls == [market.HISTORY]
 
 
 def test_fetch_detects_rate_limit_from_yfinance_log(monkeypatch):

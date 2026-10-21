@@ -2,8 +2,8 @@
 Yahoo requests; it only shows what's here.
 
 During US market hours (weekdays 9:30-16:00 ET):
-  - every 15 minutes: 6 months of daily bars for every stock (the indicators'
-    history),
+  - every 15 minutes: a year of daily bars for every stock (the indicators'
+    history; the 200-day average needs that much),
   - every 5 minutes: just the last few days of bars (the current price). They're
     merged into the history, so %K and the 50-day MA are recomputed from the
     new price and a row's price and indicators always match.
@@ -27,6 +27,7 @@ PRICE_EVERY = timedelta(minutes=5)
 BACKOFF = timedelta(minutes=30)
 OPEN, CLOSE = time(9, 30), time(16, 0)
 SETTLE = timedelta(minutes=5)  # wait a little after the close for final prices
+HISTORY = "1y"  # enough daily bars for the 200-day moving average
 
 
 class RateLimited(Exception):
@@ -109,7 +110,7 @@ class Market:
             full, price = self.plan(tickers, now)
             if not full and not price:
                 return "idle"
-            for batch, period, is_full in ((full, "6mo", True), (price, "5d", False)):
+            for batch, period, is_full in ((full, HISTORY, True), (price, "5d", False)):
                 if not batch:
                     continue
                 print(f"[market] fetching {'history' if is_full else 'prices'} for {len(batch)} stock(s)", flush=True)
