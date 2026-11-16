@@ -107,11 +107,27 @@
   .ma.below { color: var(--down); }
   .ma.above { color: var(--muted); }
   .ma .new { display: block; margin: 2px 0 0; color: var(--down); }
-  /* %K crossed %D since the last close, in the zone (see crossMark) */
-  .kx { font-size: 11px; margin-right: 4px; cursor: help; }
-  .kx.bullish { color: var(--up); }
-  .kx.bearish { color: var(--down); }
-  .chip.kx-chip { color: var(--text); }
+  /* %K crossed %D since the last close, in the zone (see crossMark / renderCrossAlerts) */
+  .kx {
+    display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+    margin-left: 6px; border-radius: 50%; font-size: 13px; font-weight: 800; line-height: 1;
+    color: #fff; vertical-align: 1px; cursor: help;
+  }
+  .kx.bullish { background: var(--up-strong); }
+  .kx.bearish { background: var(--down-strong); }
+  .cross-alerts { display: grid; gap: 8px; margin: 16px 0 0; }
+  .cross-alert {
+    display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 12px;
+    font-size: 14px; border: 1px solid;
+  }
+  .cross-alert .kx { margin: 0; flex: none; cursor: default; }
+  .cross-alert.bullish { background: var(--up-bg); border-color: var(--up-strong); }
+  .cross-alert.bearish { background: var(--down-bg); border-color: var(--down-strong); }
+  .cross-alert .tk { font-size: 15px; }
+  .cross-alert .what { font-weight: 600; }
+  .cross-alert.bullish .what { color: var(--up); }
+  .cross-alert.bearish .what { color: var(--down); }
+  .cross-alert .detail { color: var(--muted); font-size: 13px; }
   .chip.ma { background: var(--surface); color: var(--down); border-color: var(--down); }
   .rm { border: 0; background: none; color: var(--muted); padding: 4px 8px; font-size: 18px; line-height: 1; }
   .rm:hover { color: var(--down); }
@@ -230,6 +246,7 @@
     </div>
   </header>
   <div id="banner"></div>
+  <div id="crossAlerts" class="cross-alerts" hidden></div>
 
   <section>
     <h2>Positions</h2>
@@ -420,6 +437,7 @@ async function load() {
 }
 
 function render() {
+  renderCrossAlerts();
   renderPositions();
   renderWatchlist();
 }
@@ -635,22 +653,18 @@ function renderWatchlist() {
   if (data.backoff_until) {
     $("marketNote").textContent = `Yahoo is limiting requests, so updates are paused until ${clock(data.backoff_until)}. Showing the last prices.`;
   }
-  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. A red cross ✝ next to a ticker is a death cross: its ${maP}-day average is below its ${data.ma_long_period}-day average. A highlighted row is oversold and at least ${data.highlight_below_ma_pct}% below its ${maP}-day MA. A green ▲ next to %K means %K crossed above %D while oversold (bullish); a red ▼ means it crossed below %D while overbought (bearish). Both count only since the previous close. NEW means the stock entered the zone or crossed below the average since the previous close.`;
+  $("legend").textContent = `Overbought is %K ≥ ${ob} (green) and oversold is %K ≤ ${os} (red). On the bar, the dot is %K and the thin tick is %D. ${maP}D MA shows how far the price is above or below its ${maP}-day moving average; it turns red when the price is below. A red cross ✝ next to a ticker is a death cross: its ${maP}-day average is below its ${data.ma_long_period}-day average. A highlighted row is oversold and at least ${data.highlight_below_ma_pct}% below its ${maP}-day MA. A green ! next to a ticker means %K crossed above %D while oversold (bullish); a red ! means it crossed below %D while overbought (bearish). Both count only since the previous close and are also listed at the top of the page. NEW means the stock entered the zone or crossed below the average since the previous close.`;
 
   const nOb = stocks.filter((s) => s.zone === "overbought").length;
   const nOs = stocks.filter((s) => s.zone === "oversold").length;
   const nBelow = stocks.filter((s) => s.below_sma).length;
   const nCross = stocks.filter((s) => s.death_cross).length;
-  const nBull = stocks.filter((s) => s.stoch_cross === "bullish").length;
-  const nBear = stocks.filter((s) => s.stoch_cross === "bearish").length;
   $("summary").innerHTML =
     `<span class="chip">${stocks.length} stock${stocks.length === 1 ? "" : "s"}</span>` +
     (nOb ? `<span class="chip ob">${nOb} overbought</span>` : "") +
     (nOs ? `<span class="chip os">${nOs} oversold</span>` : "") +
     (nBelow ? `<span class="chip ma">${nBelow} below ${maP}D MA</span>` : "") +
-    (nCross ? `<span class="chip dc-chip">${nCross} death cross${nCross === 1 ? "" : "es"}</span>` : "") +
-    (nBull ? `<span class="chip kx-chip"><span class="up">▲</span> ${nBull} bullish %K/%D cross${nBull === 1 ? "" : "es"}</span>` : "") +
-    (nBear ? `<span class="chip kx-chip"><span class="down">▼</span> ${nBear} bearish %K/%D cross${nBear === 1 ? "" : "es"}</span>` : "");
+    (nCross ? `<span class="chip dc-chip">${nCross} death cross${nCross === 1 ? "" : "es"}</span>` : "");
 
   document.querySelectorAll("th[data-sort]").forEach((th) => {
     th.querySelector(".arrow")?.remove();
@@ -686,14 +700,14 @@ function renderWatchlist() {
     const zoneLabel = s.zone === "neutral" ? "Neutral" : s.zone === "overbought" ? "Overbought" : "Oversold";
     const clamp = (v) => Math.max(0, Math.min(100, v));
     return `<tr class="${s.zone}${highlightRow(s) ? " highlight" : ""}">
-      <td class="tk">${pm}${esc(s.ticker)}${s.death_cross ? deathCrossIcon(s) : ""}${s.stale ? '<span class="stale" title="The last update for this stock failed, so this row shows the last data that loaded">last known</span>' : ""}</td>
+      <td class="tk">${pm}${esc(s.ticker)}${crossMark(s)}${s.death_cross ? deathCrossIcon(s) : ""}${s.stale ? '<span class="stale" title="The last update for this stock failed, so this row shows the last data that loaded">last known</span>' : ""}</td>
       <td class="num">$${fmtPrice(s.price)}</td>
       <td class="num ${dir}"><span class="chg-abs">${sign(s.change)}${fmtPrice(Math.abs(s.change))} (</span>${sign(s.change)}${Math.abs(s.change_pct).toFixed(2)}%<span class="chg-abs">)</span></td>
       <td class="col-bar"><div class="bar" title="%K ${s.k.toFixed(1)} · %D ${s.d.toFixed(1)}">
         <span class="zone-lo" style="width:${os}%"></span><span class="zone-hi" style="width:${100 - ob}%"></span>
         <span class="dtick" style="left:${clamp(s.d)}%"></span><span class="dot" style="left:${clamp(s.k)}%"></span>
       </div></td>
-      <td class="num k">${crossMark(s)}${s.k.toFixed(1)}</td>
+      <td class="num k">${s.k.toFixed(1)}</td>
       <td class="num col-d">${s.d.toFixed(1)}</td>
       ${maCell(s)}
       <td class="col-zone"><span class="badge">${zoneLabel}</span>${s.is_new ? '<span class="new">NEW</span>' : ""}</td>
@@ -708,15 +722,36 @@ function highlightRow(s) {
   return s.zone === "oversold" && s.sma_pct != null && s.sma_pct <= -data.highlight_below_ma_pct;
 }
 
-// Arrow before %K: %K crossed %D since the previous close, in the oversold
-// (bullish ▲) or overbought (bearish ▼) zone. Neutral-zone crosses aren't shown.
+// %K crossed %D since the previous close, in the oversold (bullish, green) or
+// overbought (bearish, red) zone. Neutral-zone crosses aren't shown.
+function crossText(s) {
+  return s.stoch_cross === "bullish"
+    ? `%K (${s.k.toFixed(1)}) crossed above %D (${s.d.toFixed(1)}) in the oversold zone since the previous close.`
+    : `%K (${s.k.toFixed(1)}) crossed below %D (${s.d.toFixed(1)}) in the overbought zone since the previous close.`;
+}
+
+// Green or red "!" next to the ticker.
 function crossMark(s) {
   if (!s.stoch_cross) return "";
-  const bull = s.stoch_cross === "bullish";
-  const tip = bull
-    ? `Bullish cross: %K (${s.k.toFixed(1)}) crossed above %D (${s.d.toFixed(1)}) in the oversold zone since the previous close.`
-    : `Bearish cross: %K (${s.k.toFixed(1)}) crossed below %D (${s.d.toFixed(1)}) in the overbought zone since the previous close.`;
-  return `<span class="kx ${s.stoch_cross}" title="${tip}" aria-label="${tip}">${bull ? "▲" : "▼"}</span>`;
+  const tip = `${s.stoch_cross === "bullish" ? "Bullish" : "Bearish"} cross: ${crossText(s)}`;
+  return `<span class="kx ${s.stoch_cross}" title="${tip}" role="img" aria-label="${tip}">!</span>`;
+}
+
+// One alert line at the top of the page for every stock (on any list) with a
+// cross, bullish first.
+function renderCrossAlerts() {
+  const crossed = Object.values(data.stocks)
+    .filter((s) => s.stoch_cross)
+    .sort((a, b) => (a.stoch_cross === b.stoch_cross ? a.ticker.localeCompare(b.ticker) : a.stoch_cross === "bullish" ? -1 : 1));
+  $("crossAlerts").hidden = !crossed.length;
+  $("crossAlerts").innerHTML = crossed.map((s) => {
+    const bull = s.stoch_cross === "bullish";
+    return `<div class="cross-alert ${s.stoch_cross}">
+      <span class="kx ${s.stoch_cross}" aria-hidden="true">!</span>
+      <div><span class="tk">${esc(s.ticker)}</span> · <span class="what">${bull ? "Bullish cross, may be turning up" : "Bearish cross, may be turning down"}</span>
+      <div class="detail">${crossText(s)} Price $${fmtPrice(s.price)}.</div></div>
+    </div>`;
+  }).join("");
 }
 
 // Red cross next to the ticker: the 50-day MA is below the 200-day MA ("death cross").
