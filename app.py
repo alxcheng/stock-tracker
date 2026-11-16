@@ -111,6 +111,7 @@ def stock_rows() -> dict[str, dict]:
                     "death_cross": r.death_cross,
                     "death_cross_since": r.death_cross_since,
                     "death_cross_before": r.death_cross_before,
+                    "stoch_cross": r.stoch_cross,
                 }
                 for r in readings
             }

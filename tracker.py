@@ -58,6 +58,7 @@ class Reading:
     death_cross: bool = False  # the 50-day MA is below the 200-day MA
     death_cross_since: str | None = None  # date the 50-day dipped below, if within the data
     death_cross_before: str | None = None  # otherwise: it was already below on this date
+    stoch_cross: str | None = None  # "bullish"/"bearish": %K crossed %D since the last close, in the zone
 
     @property
     def change(self) -> float:
@@ -183,9 +184,21 @@ def analyze(data: dict[str, pd.DataFrame], cfg: dict) -> tuple[list[Reading], li
                 death_cross=death,
                 death_cross_since=since,
                 death_cross_before=before,
+                stoch_cross=stoch_cross(prev, now, a["overbought"], a["oversold"]),
             )
         )
     return readings, skipped
+
+
+def stoch_cross(prev, now, overbought: float, oversold: float) -> str | None:
+    """A meaningful %K/%D cross since the previous close: %K rising above %D while
+    %D is oversold ("bullish"), or falling below it while %D is overbought
+    ("bearish"). Crosses in the neutral zone are ignored as noise."""
+    if prev["k"] <= prev["d"] and now["k"] > now["d"] and now["d"] <= oversold:
+        return "bullish"
+    if prev["k"] >= prev["d"] and now["k"] < now["d"] and now["d"] >= overbought:
+        return "bearish"
+    return None
 
 
 def death_cross(short: pd.Series, long: pd.Series) -> tuple[float | None, bool, str | None, str | None]:
