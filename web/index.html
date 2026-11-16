@@ -29,6 +29,7 @@
   }
   main { max-width: 980px; margin: 0 auto; padding: 32px 16px 48px; }
   header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .header-switches { display: flex; flex-direction: column; gap: 8px; }
   h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
   .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .notice { color: var(--down); font-weight: 600; }
@@ -219,9 +220,14 @@
       <div class="sub" id="sub">Slow stochastic (14, 3, 3) on daily bars</div>
       <div class="sub notice" id="marketNote" hidden></div>
     </div>
-    <label class="switch" title="When off, prices only update while this page is open. Scheduled alert checks still run.">
-      <input type="checkbox" id="bgUpdates" checked><span class="slider"></span><span>Update when page is closed</span>
-    </label>
+    <div class="header-switches">
+      <label class="switch" title="When off, prices only update while this page is open. Scheduled alert checks still run.">
+        <input type="checkbox" id="bgUpdates" checked><span class="slider"></span><span>Update when page is closed</span>
+      </label>
+      <label class="switch" title="Refresh prices every minute instead of every 5 during market hours, so %K/%D crosses show up sooner. More requests to Yahoo, which may pause updates for 30 minutes if it limits them.">
+        <input type="checkbox" id="fastUpdates"><span class="slider"></span><span>Update every minute</span>
+      </label>
+    </div>
   </header>
   <div id="banner"></div>
 
@@ -624,7 +630,7 @@ function renderWatchlist() {
   };
   $("sub").textContent = "Slow stochastic (14, 3, 3) on daily bars" +
     (data.prices_at ? ` · prices as of ${when(data.prices_at)}` : "") +
-    (data.market_open ? " · updates every 5 min" : " · market closed");
+    (data.market_open ? (data.price_every_min === 1 ? " · updates every minute" : ` · updates every ${data.price_every_min} min`) : " · market closed");
   $("marketNote").hidden = !data.backoff_until;
   if (data.backoff_until) {
     $("marketNote").textContent = `Yahoo is limiting requests, so updates are paused until ${clock(data.backoff_until)}. Showing the last prices.`;
@@ -866,6 +872,7 @@ function renderStatus() {
   $("macRow").hidden = st.platform !== "darwin";
   $("macNotify").checked = s.macos_notify;
   $("bgUpdates").checked = s.background_updates;
+  $("fastUpdates").checked = s.fast_updates;
 
   const times = st.schedule.times_et.map(etLabel).join(", ");
   $("schedText").textContent = `Checks run weekdays at ${times} Eastern while this computer is on. If it was asleep, a missed check runs when it wakes.` +
@@ -951,6 +958,10 @@ setInterval(() => { if (!document.hidden) load(); }, 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 $("bgUpdates").addEventListener("change", async () => {
   try { status = await post("/api/settings", { background_updates: $("bgUpdates").checked }); renderStatus(); }
+  catch (e) { $("msg").textContent = e.message; }
+});
+$("fastUpdates").addEventListener("change", async () => {
+  try { status = await post("/api/settings", { fast_updates: $("fastUpdates").checked }); renderStatus(); await load(); }
   catch (e) { $("msg").textContent = e.message; }
 });
 setInterval(() => { if (!document.hidden) loadStatus(); }, 5 * 60 * 1000);

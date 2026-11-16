@@ -4,9 +4,10 @@ Yahoo requests; it only shows what's here.
 During US market hours (weekdays 9:30-16:00 ET):
   - every 15 minutes: a year of daily bars for every stock (the indicators'
     history; the 200-day average needs that much),
-  - every 5 minutes: just the last few days of bars (the current price). They're
-    merged into the history, so %K and the 50-day MA are recomputed from the
-    new price and a row's price and indicators always match.
+  - every 5 minutes (every minute with "Update every minute" on): just the last
+    few days of bars (the current price). They're merged into the history, so
+    %K and the 50-day MA are recomputed from the new price and a row's price
+    and indicators always match.
 Outside market hours: one refresh after the close, then nothing until the open.
 Anything missing, such as a stock just added or data from before the computer
 slept, counts as due right away. If Yahoo answers "Too Many Requests", fetching
@@ -24,6 +25,7 @@ from scheduler import ET
 
 FULL_EVERY = timedelta(minutes=15)
 PRICE_EVERY = timedelta(minutes=5)
+FAST_PRICE_EVERY = timedelta(minutes=1)
 BACKOFF = timedelta(minutes=30)
 OPEN, CLOSE = time(9, 30), time(16, 0)
 SETTLE = timedelta(minutes=5)  # wait a little after the close for final prices
@@ -71,9 +73,11 @@ def merge(history: pd.DataFrame, recent: pd.DataFrame) -> pd.DataFrame:
 
 
 class Market:
-    def __init__(self, fetch):
-        """fetch(tickers, period) -> {ticker: DataFrame}; raises RateLimited."""
+    def __init__(self, fetch, price_every=lambda: PRICE_EVERY):
+        """fetch(tickers, period) -> {ticker: DataFrame}; raises RateLimited.
+        price_every() -> how often to refresh prices while the market is open."""
         self._fetch = fetch
+        self.price_every = price_every
         self.history: dict[str, pd.DataFrame] = {}
         self.full_at: dict[str, datetime] = {}   # last full attempt, per ticker
         self.price_at: dict[str, datetime] = {}  # last price attempt, per ticker
@@ -88,9 +92,10 @@ class Market:
 
     def plan(self, tickers: list[str], now: datetime) -> tuple[list[str], list[str]]:
         """(tickers needing full history, tickers needing just a price update)."""
+        every = self.price_every()
         full = [t for t in tickers if due(now, self.full_at.get(t), FULL_EVERY)]
         price = [t for t in tickers if t not in full and t in self.history
-                 and due(now, self.price_at.get(t), PRICE_EVERY)]
+                 and due(now, self.price_at.get(t), every)]
         return full, price
 
     def overdue(self, tickers: list[str], now: datetime, grace: timedelta = timedelta(minutes=2)) -> bool:

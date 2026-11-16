@@ -45,7 +45,7 @@ Checks run on weekdays at 10am, 12pm, 2pm and 4pm US Eastern while your computer
 
 ## Price updates
 
-During market hours, prices update every 5 minutes. They stay put outside market hours. The **Update when page is closed** switch at the top controls whether that continues with the page closed. Turn it off to fetch prices only while the page is open. Scheduled alert checks still run at their times either way.
+During market hours, prices update every 5 minutes. They stay put outside market hours. The **Update when page is closed** switch at the top controls whether that continues with the page closed. Turn it off to fetch prices only while the page is open. Scheduled alert checks still run at their times either way. Turn on **Update every minute** to refresh prices every minute instead, so %K/%D crosses show up sooner. That means five times as many requests to Yahoo, so updates are more likely to pause for 30 minutes if it limits them.
 
 ## Updates
 
@@ -74,7 +74,7 @@ Your watchlist and positions are kept unless you ask for them to be deleted.
 | Piece | What it does |
 |---|---|
 | `app.py` | The local web server at http://127.0.0.1:8050. It runs the alert schedule (`scheduler.py`) and the daily update check (`updater.py`) itself, so each OS only needs one background job. |
-| `market.py` | The only regular source of Yahoo requests. During market hours it fetches prices every 5 minutes and the indicators' history every 15. After the close it fetches once, then waits for the next open. It pauses 30 minutes if Yahoo says "too many requests". Loading the page never triggers a fetch unless data is missing or out of date. |
+| `market.py` | The only regular source of Yahoo requests. During market hours it fetches prices every 5 minutes (every minute with **Update every minute** on) and the indicators' history every 15. After the close it fetches once, then waits for the next open. It pauses 30 minutes if Yahoo says "too many requests". Loading the page never triggers a fetch unless data is missing or out of date. |
 | `tracker.py`, `stoch.py`, `positions.py`, `lists.py` | Market data (yfinance), the indicators, positions, lists with their alert rules and share codes, and alert logic. |
 | `bootstrap.py` | Started at login: launchd on Mac, the Startup folder with `pythonw` on Windows. It runs the current version, restarts it after updates, and rolls back an update that keeps crashing. Standard library only. |
 | `install.sh`, `install.ps1` | Install `uv` into the user's home folder; uv brings its own Python. They download the release, verify its checksum, install the locked dependencies, run `selftest.py`, and register the background job. |

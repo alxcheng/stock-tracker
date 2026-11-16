@@ -125,3 +125,24 @@ def test_fetch_detects_rate_limit_from_yfinance_log(monkeypatch):
     monkeypatch.setattr(tracker.yf, "download", fake_download)
     with pytest.raises(RateLimited):
         tracker.fetch(["AAPL"])
+
+
+def test_fast_updates_refresh_prices_every_minute():
+    yahoo = FakeYahoo()
+    fast = [False]
+    m = Market(yahoo, lambda: market.FAST_PRICE_EVERY if fast[0] else market.PRICE_EVERY)
+    m.refresh(["A"], THU_NOON)
+    assert m.refresh(["A"], THU_NOON + timedelta(minutes=1)) == "idle"
+    fast[0] = True  # switched on from the page; takes effect on the next check
+    assert m.refresh(["A"], THU_NOON + timedelta(minutes=1)) == "updated"
+    assert yahoo.calls[-1] == (("A",), "5d")
+    assert m.refresh(["A"], THU_NOON + timedelta(seconds=90)) == "idle"
+    assert m.refresh(["A"], THU_NOON + timedelta(minutes=2)) == "updated"
+
+
+def test_fast_updates_do_nothing_while_closed():
+    yahoo = FakeYahoo()
+    m = Market(yahoo, lambda: market.FAST_PRICE_EVERY)
+    evening = at(2026, 10, 15, 18, 0)
+    m.refresh(["A"], evening)
+    assert m.refresh(["A"], evening + timedelta(minutes=1)) == "idle"

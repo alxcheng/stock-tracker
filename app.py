@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -30,7 +30,7 @@ import scheduler
 import settings
 import tracker
 import updater
-from market import Market, market_open
+from market import FAST_PRICE_EVERY, PRICE_EVERY, Market, market_open
 
 HERE = Path(__file__).parent
 INDEX = HERE / "web" / "index.html"
@@ -46,7 +46,15 @@ _last_view = 0.0  # when an open, visible page last asked for data
 # calling it from the server's per-request threads leaks file handles until the
 # process hits "Too many open files". Funnel every call through one long-lived thread.
 _yf_thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yfinance")
-market = Market(lambda tickers, period: tracker.fetch(tickers, threads=False, period=period))
+
+
+def price_every() -> timedelta:
+    """How often prices refresh during market hours: every minute with
+    "Update every minute" on (for catching %K/%D crosses sooner), else every 5."""
+    return FAST_PRICE_EVERY if settings.load().get("fast_updates") else PRICE_EVERY
+
+
+market = Market(lambda tickers, period: tracker.fetch(tickers, threads=False, period=period), price_every)
 _rows: dict = {"version": None, "rows": {}}
 _rows_lock = threading.Lock()
 
@@ -146,6 +154,7 @@ def snapshot() -> dict:
     return {
         "prices_at": _iso(market.oldest_update(tickers)),
         "market_open": market_open(now),
+        "price_every_min": price_every().total_seconds() / 60,
         "backoff_until": _iso(market.backoff_until) if market.backing_off(now) else None,
         "overbought": cfg["alerts"]["overbought"],
         "oversold": cfg["alerts"]["oversold"],
@@ -192,6 +201,7 @@ def status_payload() -> dict:
             "ntfy_server": (s.get("ntfy_server") or "https://ntfy.sh").rstrip("/"),
             "macos_notify": bool(s.get("macos_notify")),
             "background_updates": bool(s.get("background_updates", True)),
+            "fast_updates": bool(s.get("fast_updates", False)),
         },
     }
 
@@ -394,6 +404,8 @@ class Handler(BaseHTTPRequestHandler):
             changes["macos_notify"] = bool(body["macos_notify"])
         if "background_updates" in body:
             changes["background_updates"] = bool(body["background_updates"])
+        if "fast_updates" in body:
+            changes["fast_updates"] = bool(body["fast_updates"])
         if "position_alerts" in body:
             changes["position_alerts"] = bool(body["position_alerts"])
         if "gain_alert_pct" in body:
